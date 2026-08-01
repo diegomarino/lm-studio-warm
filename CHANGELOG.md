@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.1](https://github.com/diegomarino/opencode-lmstudio-warm/compare/v0.2.0...v0.2.1) (2026-08-01)
+
+### Bug Fixes
+
+* **docs:** correct README claim that eviction cannot free RAM ([2908a4b](https://github.com/diegomarino/opencode-lmstudio-warm/commit/2908a4b581dd520a02e775ad0a5c2a6aedf584f3))
+
+### Documentation
+
+* lead README with benefit list and fix example placeholders ([8fda089](https://github.com/diegomarino/opencode-lmstudio-warm/commit/8fda089b56175d23bb41a0754a645eb3d16fbe02))
+
 ## [0.2.0](https://github.com/diegomarino/opencode-lmstudio-warm/compare/v0.1.2...v0.2.0) (2026-07-06)
 
 ### Features
