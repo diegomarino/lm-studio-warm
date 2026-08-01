@@ -12,7 +12,7 @@
   "evictOnPressure": true,
   "ramBudgetMB": 0,
   "evictHeadroomMB": 4096,
-  "evictProtect": [],
+  "evictProtect": ["your-small-model-key"],
   "evictMaxVictims": 8,
   "perModel": {
     "your-main-model-key": { "parallel": 6 },

@@ -18,7 +18,7 @@ Set `model` / `small_model` to your own model keys before use.
 
 ## `lmstudio-warm.json` — tuning the plugin
 
-A fleet-tuned starting point for the plugin's own options file. Copy it to
+A starting point with every option shown explicitly. Copy it to
 `~/.config/opencode/lmstudio-warm.json` (or pass the same object as plugin
 options in `opencode.json`). Highlights:
 
@@ -30,7 +30,8 @@ options in `opencode.json`). Highlights:
   queue server-side (latency, not failure), so undersizing is safe. The small
   model tolerates queueing; the main model is where fleet width matters.
 - **timeouts** (`loadTimeoutMs`, `serverStartTimeoutMs`, `lockWaitTimeoutMs`,
-  `verifyCacheMs`, `retryCooldownMs`) are tuned for a multi-worker fleet.
+  `verifyCacheMs`, `retryCooldownMs`) are shown explicitly at their default
+  values so every knob is visible in one place — raise them for a busy fleet.
 - **`evictOnPressure: true`** — opt-in RAM-pressure eviction (off by default in
   the plugin). On a finite-RAM host with several large models, it unloads
   **idle** instances (never busy, never the target, never a key in

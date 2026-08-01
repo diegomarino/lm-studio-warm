@@ -1,24 +1,28 @@
 # opencode-lmstudio-warm
 
-Deterministic model pre-warm for **opencode + LM Studio**.
+Deterministic, dependency-free model pre-warm for **opencode + LM Studio**.
+Guarantees your model is loaded and addressable _before_ any request leaves
+opencode.
+
+- **Loads the model before your first request** — no cold-start hang, no
+  `"no model loaded"` error.
+- **Re-warms after a mid-session eviction** — if LM Studio's idle TTL drops the
+  model between two messages, the next request reloads it automatically.
+- **Warms both models at startup** — your `model` and `small_model` load eagerly
+  in the background, so the first real request is already hot.
+- **Frees RAM when the machine is full** _(opt-in)_ — if a model won't fit, it
+  unloads idle models least-recently-used first (never busy, never protected) to
+  make room instead of letting the load fail. Enable with
+  [`evictOnPressure`](#ram-pressure-eviction-opt-in).
+- **One load across parallel sessions** — N cold spawns trigger exactly one
+  `lms load`, with no `:2` duplicate instances left behind.
 
 ![Quick start: install the plugin, LM Studio starts cold, the first opencode run warms the model before the request leaves, and lms ps shows both models resident with no TTL](https://github.com/user-attachments/assets/f5522cb6-7967-4f47-a8c5-ca617a8d736a)
 
 <sup>Scripted demo (`tools/quickstart/generate-cast.py`) — every output line captured verbatim from a real run; the cold-load wait is shortened, and its spinner visualizes the plugin's background `lms load` (opencode itself waits silently).</sup>
 
-A dependency-free opencode plugin that **guarantees your LM Studio model is
-loaded and addressable _before_ any request leaves opencode**.
-
-If you point
-opencode at LM Studio, it fixes three failures you have probably already met:
-
-- **First request hangs** — the model is cold and JIT-loads while your request waits.
-- **`"no model loaded"` errors** — JIT is off and nothing loads the model for you.
-- **Mid-session breakage** — LM Studio's idle TTL evicted the model between two messages.
-
-Per request, the plugin checks that the model is actually loaded and, when it
-isn't, performs exactly one `lms load` (even across parallel sessions) before
-letting the request through.
+Per request, the plugin verifies the model is actually loaded and, only when it
+isn't, performs that single `lms load` before letting the request through.
 
 Verified against opencode **v1.17.10** and **LM Studio 0.4.18** (`lms` CLI
 commit `6041ae0`) on macOS/Apple Silicon (see
@@ -73,7 +77,7 @@ first token is requested.
 All three paths load the same plugin — pick the one that fits:
 
 | Path | Best for |
-|------|----------|
+| ------ | ---------- |
 | [npm](#npm-recommended) (recommended) | Most users and fleets — version-pinned, one-line updates |
 | [Single-file copy](#single-file-copy-offline-fleet-wide) | Offline machines |
 | [Project-local](#project-local) | Hacking on the plugin itself |
@@ -89,7 +93,7 @@ The Quick start command above is all you need. Notes:
 - Use `-f` to force a version bump.
 
 **Scriptable setup** — for fleets or automation, this `jq` one-shot registers
-the plugin *and* scaffolds the provider with recommended timeouts. It is
+the plugin _and_ scaffolds the provider with recommended timeouts. It is
 idempotent and non-destructive: keeps your existing plugins, provider, and
 models, and never overwrites options you've set.
 
@@ -140,7 +144,7 @@ The plugin works with zero configuration. Optional tuning lives in
 > neither verify nor load models on a remote server.
 
 | Option | Default | What it does |
-|--------|---------|--------------|
+| -------- | --------- | -------------- |
 | `providers` | `["lmstudio"]` | Provider IDs to gate; requests on other providers are ignored. All listed providers must address the local LM Studio. |
 | `lmsPath` | `~/.lmstudio/bin/lms` if present, else `lms` | Path to the `lms` CLI. |
 | `baseURL` | `http://127.0.0.1:1234/v1` | Fallback base URL when the provider config doesn't carry one. Must be loopback. |
@@ -166,6 +170,14 @@ The plugin works with zero configuration. Optional tuning lives in
 | `lockDir` | `~/.cache/opencode/lmstudio-warm.lock` | Cross-process lock directory. |
 
 ### RAM-pressure eviction (opt-in)
+
+> **Symptom this fixes:** the log shows `lms load … FAILED … insufficient
+> system resources` (or opencode surfaces `cannot ensure model … is loaded`),
+> while `lms ps` still lists other models resident. Nothing is broken — the gate
+> tried to load and LM Studio's guardrail refused because RAM is full, so it
+> reported the failure instead of freezing your machine. Eviction is **opt-in
+> and off by default**: a stock install warns rather than making room. Turn it
+> on with `evictOnPressure` to have the gate unload idle models first.
 
 On a finite-RAM host running several large models, LM Studio with
 `modelLoadingGuardrails` set high **refuses** to load a model that doesn't fit
@@ -203,8 +215,10 @@ unloaded per attempt, bounding worst-case lock-hold time.
 > case is enough. If loads are still refused with large context or parallelism,
 > raise `evictHeadroomMB`.
 
-See `examples/lmstudio-warm.json` for a fleet-tuned starting point
-(`cp examples/lmstudio-warm.json ~/.config/opencode/lmstudio-warm.json`).
+See `examples/lmstudio-warm.json` for a starting point with every option
+visible. Copy it to `~/.config/opencode/lmstudio-warm.json` and replace the
+`your-*-model-key` placeholders with your real model keys — the `perModel` and
+`evictProtect` entries do nothing until they match a key opencode actually sends.
 `perModel` keys are LM Studio model keys — the exact string opencode sends as
 the API `model` field. Sizing `parallel`: set it to the expected number of
 concurrent workers hitting that model; each slot costs extra KV-cache memory,
