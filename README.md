@@ -331,9 +331,11 @@ it is not required.
 - **LM Studio app fully closed**: `lms server start` + `open -ga "LM Studio"`
   fallback is implemented but untested here (the app was running). Confirm:
   quit LM Studio → run one worker → check the log.
-- **Memory guardrails**: if LM Studio's guardrail refuses a load, the plugin
-  fails that request with a clear error and cools down 60 s (no load storm) —
-  it cannot free VRAM for you.
+- **Memory guardrails**: if LM Studio's guardrail refuses a load, the default
+  behavior is to fail that request with a clear error and cool down 60 s (no
+  load storm). Enable [`evictOnPressure`](#ram-pressure-eviction-opt-in) to have
+  the gate unload idle models and make room first; with it off (the default),
+  the plugin warns instead of freeing RAM for you.
 - **API auth**: the plugin itself never needs `LM_API_TOKEN` (lms + probe are
   auth-independent); workers still need it for generation when auth is on.
 
