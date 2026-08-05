@@ -67,7 +67,10 @@ Then set your `model` / `small_model` to your LM Studio model keys. See
 
 **3. Adjust LM Studio once** (App Settings → Developer): disable
 **JIT model auto-unload TTL** and **unload previous JIT model on load**; keep
-JIT itself on as a fallback. ([Why these matter →](#how-it-works))
+JIT itself on as a fallback. ([Why these matter →](#how-it-works)) That GUI TTL
+governs only JIT loads, **not** the plugin's own `lms load` — to auto-unload
+warmed models by idle time, use [`ttlSeconds`](#freeing-ram-two-strategies)
+instead.
 
 That's it — from your next opencode session, the model is warm before the
 first token is requested.
@@ -148,7 +151,7 @@ The plugin works with zero configuration. Optional tuning lives in
 | `providers` | `["lmstudio"]` | Provider IDs to gate; requests on other providers are ignored. All listed providers must address the local LM Studio. |
 | `lmsPath` | `~/.lmstudio/bin/lms` if present, else `lms` | Path to the `lms` CLI. |
 | `baseURL` | `http://127.0.0.1:1234/v1` | Fallback base URL when the provider config doesn't carry one. Must be loopback. |
-| `ttlSeconds` | `0` | `--ttl` for `lms load`; `0` omits the flag (resident until unloaded). |
+| `ttlSeconds` | `0` | `--ttl` for `lms load`; `0` omits the flag (resident until unloaded). The GUI "JIT auto-unload TTL" does **not** govern these explicit loads — set this to get time-based auto-unload. See [Freeing RAM](#freeing-ram-two-strategies). |
 | `parallel` | `0` | `--parallel` for `lms load`; `0` omits it (LM Studio default, currently 4). Size ≈ concurrent fleet width; overflow queues server-side. |
 | `contextLength` | `0` | `--context-length` for `lms load`; `0` omits it (model default). |
 | `perModel` | `{}` | Per-model-key overrides of `ttlSeconds` / `parallel` / `contextLength`. |
@@ -168,6 +171,45 @@ The plugin works with zero configuration. Optional tuning lives in
 | `evictMaxVictims` | `8` | Max instances eviction may unload per warm attempt (predictive + reactive combined). Caps worst-case lock-hold time; `0` = unlimited. |
 | `logFile` | `~/.cache/opencode/lmstudio-warm.log` | Plugin log file; rotated to `<logFile>.old` once it grows past ~5 MB. |
 | `lockDir` | `~/.cache/opencode/lmstudio-warm.lock` | Cross-process lock directory. |
+
+### Freeing RAM: two strategies
+
+By default the plugin loads models **resident** (`ttlSeconds: 0` ⇒ no `--ttl`,
+`ttlMs: null`): they stay in memory until something unloads them. That is what
+makes pre-warm deterministic, but on a finite-RAM host you'll eventually want a
+model to give its memory back. There are two independent knobs for that, and they
+**compose** — e.g. a TTL on the big model, `evictProtect` on the small one:
+
+| Goal | Knob | How it frees RAM | Tradeoff |
+| ---- | ---- | ---------------- | -------- |
+| Unload after idle **time** | [`ttlSeconds`](#configuration) (+ `perModel`) | LM Studio auto-unloads the instance once it's idle past the TTL | The next request pays a cold-start reload; the gate makes it deterministic (blocks until loaded), but the latency is real |
+| Unload only under **RAM pressure** | [`evictOnPressure`](#ram-pressure-eviction-opt-in) | The gate unloads idle LRU instances only when a new load won't otherwise fit | No cold-start until memory is actually contended; nothing is freed purely for sitting idle |
+
+> **⚠ The GUI "JIT auto-unload TTL" does not apply to the plugin's loads.** That
+> setting governs only JIT-loaded instances. The plugin's explicit `lms load`
+> produces a *resident* instance (`ttlMs: null`), bookkept separately, that the
+> GUI TTL never touches — so if you set the GUI TTL and see warmed models never
+> expire, this is why. To get time-based auto-unload for warmed models, set
+> **`ttlSeconds`** in the plugin config; that is the `--ttl` LM Studio actually
+> honors for these instances.
+
+**Time-based** — set a global TTL and override per model (e.g. keep the small
+model resident, let the big one expire). See
+[`examples/lmstudio-warm.ttl.json`](./examples/lmstudio-warm.ttl.json):
+
+```json
+{
+  "ttlSeconds": 3600,
+  "perModel": {
+    "your-main-model-key": { "ttlSeconds": 600 },
+    "your-small-model-key": { "ttlSeconds": 0 }
+  }
+}
+```
+
+**Pressure-based** — keep models resident and let the gate make room on demand;
+see [RAM-pressure eviction](#ram-pressure-eviction-opt-in) below for the full
+mechanism and [`examples/lmstudio-warm.json`](./examples/lmstudio-warm.json).
 
 ### RAM-pressure eviction (opt-in)
 
