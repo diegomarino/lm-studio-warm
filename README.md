@@ -6,8 +6,9 @@ opencode.
 
 - **Loads the model before your first request** — no cold-start hang, no
   `"no model loaded"` error.
-- **Re-warms after a mid-session eviction** — if LM Studio's idle TTL drops the
-  model between two messages, the next request reloads it automatically.
+- **Re-warms after a mid-session eviction** — if the model disappears between two
+  messages (a TTL you've set expires, an external unload, a JIT eviction), the
+  next request reloads it automatically.
 - **Warms both models at startup** — your `model` and `small_model` load eagerly
   in the background, so the first real request is already hot.
 - **Frees RAM when the machine is full** _(opt-in)_ — if a model won't fit, it
@@ -314,12 +315,16 @@ and can stay.
    `ttlMs: null` verified) → post-load verification. Plus a background eager
    warm of `model` + `small_model` at instance start (`config` hook).
 2. **LM Studio server settings (independent)** — in the GUI (App Settings →
-   Developer): disable **JIT model auto-unload TTL** (`jitModelTTL`, the 1 h
-   eviction that stalls long sessions) and **unload previous JIT model on load**
-   (`unloadPreviousJITModelOnLoad` — otherwise a JIT load of one model can
-   evict the other). Keys live in `~/.lmstudio/settings.json` under
-   `developer.*` (edit only while the app is closed). Keep JIT **on** as a
-   fallback; keep server autostart on.
+   Developer): disable **JIT model auto-unload TTL** (`jitModelTTL`, default 1 h)
+   and **unload previous JIT model on load** (`unloadPreviousJITModelOnLoad` —
+   otherwise a JIT load of one model can evict the other). Both act only on
+   **JIT-loaded** instances; the plugin's own `lms load` is resident
+   (`ttlMs: null`) and already exempt, so these settings govern the JIT fallback
+   path and any non-gated client, not the warmed models themselves. (To make
+   warmed models auto-unload by idle time, use
+   [`ttlSeconds`](#freeing-ram-two-strategies) — that GUI TTL won't do it.) Keys
+   live in `~/.lmstudio/settings.json` under `developer.*` (edit only while the
+   app is closed). Keep JIT **on** as a fallback; keep server autostart on.
 3. **opencode timeouts (defense-in-depth)** — v1.17.10 honors undocumented
    provider options `timeout`, `headerTimeout`, `chunkTimeout`
    (`provider.ts:resolveSDK`). Default is NO timeout at all (infinite hang
