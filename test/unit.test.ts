@@ -21,6 +21,9 @@ import {
   type WarmOptions,
   type LmsInstance,
 } from "../src/pure"
+import * as path from "node:path"
+import { configCandidatePaths, parseConfigFile, loadConfig } from "../src/config"
+
 
 const MiB = 1024 * 1024
 
@@ -322,5 +325,92 @@ describe("eviction pure", () => {
     expect(isMemoryPressureError("context length exceeds max")).toBe(false)
     expect(isMemoryPressureError("insufficient disk space")).toBe(false)
     expect(isMemoryPressureError("model not found")).toBe(false)
+  })
+})
+describe("configCandidatePaths", () => {
+  it("defaults to ~/.omp/agent lm-studio-warm.{yml,yaml,json}", () => {
+    const home = "/tmp/fake-home"
+    expect(configCandidatePaths(home, {})).toEqual([
+      path.join(home, ".omp/agent/lm-studio-warm.yml"),
+      path.join(home, ".omp/agent/lm-studio-warm.yaml"),
+      path.join(home, ".omp/agent/lm-studio-warm.json"),
+    ])
+  })
+
+  it("honors PI_CODING_AGENT_DIR over default agent dir", () => {
+    const home = "/tmp/fake-home"
+    const paths = configCandidatePaths(home, { PI_CODING_AGENT_DIR: "/custom/agent" })
+    expect(paths[0]).toBe("/custom/agent/lm-studio-warm.yml")
+  })
+})
+
+describe("parseConfigFile", () => {
+  it("parses YAML objects", () => {
+    const { opts, warning } = parseConfigFile("failMode: closed\neager: false\n", "x.yml")
+    expect(warning).toBeNull()
+    expect(opts.failMode).toBe("closed")
+    expect(opts.eager).toBe(false)
+  })
+
+  it("parses JSON when path ends with .json", () => {
+    const { opts, warning } = parseConfigFile('{"parallel":3}', "x.json")
+    expect(warning).toBeNull()
+    expect(opts.parallel).toBe(3)
+  })
+
+  it("warns on malformed content", () => {
+    const { opts, warning } = parseConfigFile("{", "x.json")
+    expect(opts).toEqual({})
+    expect(warning).toMatch(/parse/i)
+  })
+
+  it("warns when top-level is not an object", () => {
+    const { opts, warning } = parseConfigFile("[]", "x.json")
+    expect(opts).toEqual({})
+    expect(warning).toMatch(/object/i)
+  })
+})
+
+describe("loadConfig", () => {
+  it("missing file → inactive", () => {
+    const r = loadConfig({
+      home: "/no/such/home",
+      env: {},
+      readFile: () => {
+        throw Object.assign(new Error("enoent"), { code: "ENOENT" })
+      },
+    })
+    expect(r.active).toBe(false)
+    if (!r.active) expect(r.reason).toBe("missing")
+  })
+
+  it("enabled:false → inactive disabled", () => {
+    const r = loadConfig({
+      home: "/h",
+      env: {},
+      readFile: (p) => {
+        if (p.endsWith(".yml")) return "enabled: false\n"
+        throw Object.assign(new Error("enoent"), { code: "ENOENT" })
+      },
+    })
+    expect(r.active).toBe(false)
+    if (!r.active) expect(r.reason).toBe("disabled")
+  })
+
+  it("present file → active with sanitized defaults merged", () => {
+    const r = loadConfig({
+      home: "/h",
+      env: {},
+      readFile: (p) => {
+        if (p.endsWith(".yml")) return "failMode: closed\nunknownKey: 1\n"
+        throw Object.assign(new Error("enoent"), { code: "ENOENT" })
+      },
+    })
+    expect(r.active).toBe(true)
+    if (r.active) {
+      expect(r.opts.failMode).toBe("closed")
+      expect(r.opts.providers).toEqual(["lm-studio"])
+      expect(r.warnings.some((w) => w.includes("unknownKey"))).toBe(true)
+    }
   })
 })
