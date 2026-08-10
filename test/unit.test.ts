@@ -23,6 +23,7 @@ import {
 } from "../src/pure"
 import * as path from "node:path"
 import { configCandidatePaths, parseConfigFile, loadConfig } from "../src/config"
+import { createLmsClient, type Runner } from "../src/lms"
 
 
 const MiB = 1024 * 1024
@@ -194,6 +195,45 @@ describe("decodeProcessOutput", () => {
     expect(decodeProcessOutput(Buffer.from('{"a":1}', "utf8"))).toBe('{"a":1}')
   })
 })
+
+describe("createLmsClient", () => {
+  it("psInstances parses array stdout and returns null on failure", async () => {
+    const calls: string[][] = []
+    const run: Runner = async (_cmd, args) => {
+      calls.push(args)
+      if (args[0] === "ps") {
+        return {
+          ok: true,
+          timedOut: false,
+          stdout: JSON.stringify([{ identifier: "k", modelKey: "k" }]),
+          stderr: "",
+        }
+      }
+      return { ok: false, timedOut: false, stdout: "", stderr: "nope" }
+    }
+    const client = createLmsClient("/bin/lms", run)
+    await expect(client.psInstances()).resolves.toEqual([{ identifier: "k", modelKey: "k" }])
+    expect(calls[0]).toEqual(["ps", "--json"])
+  })
+
+  it("psInstances returns null when stdout is unusable", async () => {
+    const run: Runner = async () => ({ ok: true, timedOut: false, stdout: "not-json", stderr: "" })
+    const client = createLmsClient("lms", run)
+    await expect(client.psInstances()).resolves.toBeNull()
+  })
+
+  it("lsModels unwraps {models:[]} ", async () => {
+    const run: Runner = async () => ({
+      ok: true,
+      timedOut: false,
+      stdout: JSON.stringify({ models: [{ modelKey: "k", sizeBytes: 12 }] }),
+      stderr: "",
+    })
+    const client = createLmsClient("lms", run)
+    await expect(client.lsModels()).resolves.toEqual([{ modelKey: "k", sizeBytes: 12 }])
+  })
+})
+
 
 describe("parseModelRef", () => {
   it("splits on first slash only", () => {
