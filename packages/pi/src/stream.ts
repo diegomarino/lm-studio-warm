@@ -70,12 +70,16 @@ export function createGatedProviderStreams(deps: GatedStreamDeps): ProviderStrea
         // clear it before streaming (or erroring) so the message cannot stick.
         const ui = deps.getUi?.() ?? null
         const showProgress = () => {
-          ui?.setStatus("lm-studio-warm", `warming ${model.id}`)
-          ui?.setWorkingMessage(`warming ${model.id}`)
+          try {
+            ui?.setStatus("lm-studio-warm", `warming ${model.id}`)
+            ui?.setWorkingMessage(`lm-studio-warm: ensuring ${model.id} is loaded (a cold load can take minutes)`)
+          } catch {}
         }
         const clearProgress = () => {
-          ui?.setStatus("lm-studio-warm", undefined)
-          ui?.setWorkingMessage()
+          try {
+            ui?.setStatus("lm-studio-warm", undefined)
+            ui?.setWorkingMessage()
+          } catch {}
         }
 
         try {
@@ -86,7 +90,10 @@ export function createGatedProviderStreams(deps: GatedStreamDeps): ProviderStrea
             outer.push({
               type: "error",
               reason: "error",
-              error: warmFailureMessage(model, `lm-studio-warm: ${result.reason}`),
+              error: warmFailureMessage(
+                model,
+                `lm-studio-warm: cannot ensure model "${model.id}" is loaded — ${result.reason}. See ${deps.logFile}`,
+              ),
             })
             return
           }

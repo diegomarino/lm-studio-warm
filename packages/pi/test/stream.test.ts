@@ -115,7 +115,9 @@ describe("createGatedProviderStreams", () => {
     const ev = events[0] as { type: string; reason: string; error: { errorMessage?: string } }
     expect(ev.type).toBe("error")
     expect(ev.reason).toBe("error")
+    expect(ev.error.errorMessage).toContain('lm-studio-warm: cannot ensure model "k" is loaded')
     expect(ev.error.errorMessage).toContain("lock contention timeout")
+    expect(ev.error.errorMessage).toContain(`See ${baseDeps().logFile}`)
   })
 
   it("an aborted signal produces a terminal error event with reason \"aborted\"", async () => {
@@ -170,7 +172,10 @@ describe("createGatedProviderStreams", () => {
       await new Promise((r) => setTimeout(r, 10))
     }
     expect(uiCalls).toContainEqual(["setStatus", "lm-studio-warm", "warming big-model"])
-    expect(uiCalls).toContainEqual(["setWorkingMessage", "warming big-model"])
+    expect(uiCalls).toContainEqual([
+      "setWorkingMessage",
+      "lm-studio-warm: ensuring big-model is loaded (a cold load can take minutes)",
+    ])
 
     release?.()
     const events: unknown[] = []

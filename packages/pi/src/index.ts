@@ -85,7 +85,10 @@ export async function activateExtension(pi: ExtensionAPI, load: typeof loadPiCon
         },
       },
       models: initial,
-      fetchModels: async () => toPiModels(await discover(), opts.baseURL), // full replace on refreshModels(context)
+      // refresh replaces the dynamic overlay; baseline `models` snapshot
+      // entries persist until restart (createProvider merges baseline ∪
+      // dynamic overlay, so a model removed upstream is never pruned mid-session).
+      fetchModels: async () => toPiModels(await discover(), opts.baseURL),
       api: streams,
     }),
   )
@@ -93,8 +96,8 @@ export async function activateExtension(pi: ExtensionAPI, load: typeof loadPiCon
   pi.on("session_start", async (_event, ctx: ExtensionContext) => {
     uiCtx = ctx
 
-    for (const warning of warnings) {
-      if (ctx.hasUI) ctx.ui.notify(summarizeWarnings([warning], opts.logFile), "warning")
+    if (warnings.length > 0 && ctx.hasUI) {
+      ctx.ui.notify(summarizeWarnings(warnings, opts.logFile), "warning")
     }
 
     if (opts.eager) {
