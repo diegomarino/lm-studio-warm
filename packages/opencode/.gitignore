@@ -1,0 +1,33 @@
+# Dependencies (dev-only, for type-checking the plugin against @opencode-ai/plugin).
+# bun.lock IS tracked so CI and the release workflow build with the exact
+# dependency set that was tested (bun install --frozen-lockfile).
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# Local session / assistant state — not part of the published plugin
+.remember/
+
+# Runtime output the plugin writes on the host machine
+*.log
+lmstudio-warm.log
+
+# Local (non-example) tuning file, if someone drops one in the repo
+/lmstudio-warm.json
+
+# Personal dev config that powers verify.sh locally (real model keys). The
+# public reference lives in examples/opencode.json.
+/opencode.json
+
+# Rendered by verify.sh from opencode.template.json with the real MAIN/SMALL
+# keys — never commit real keys; the tracked template keeps placeholders.
+/test/e2e/opencode.json
+
+# Root .opencode/ is re-bootstrapped by opencode when run in this repo
+# (node_modules, lockfiles). Anchored so the test/e2e/.opencode/ fixture is kept.
+/.opencode/
+
+# OS / editor cruft
+.DS_Store
+*.swp
