@@ -1,4 +1,4 @@
-# Copy to ~/.omp/agent/lm-studio-warm.yml
+# Copy to ~/.pi/agent/lm-studio-warm.yml
 # Presence of this file activates the plugin (delete it or set enabled: false to disable).
 
 eager: true
