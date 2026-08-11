@@ -1,0 +1,33 @@
+# Minimal CI gate: typecheck + tests + dependency audit.
+# Actions are SHA-pinned (audit F28): a tag move cannot change what runs here.
+name: ci
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      # Hermeticity gate (audit F5): tests run against a scratch HOME and must
+      # not create the plugin's cache/log tree there.
+      - name: bun test (hermetic HOME)
+        run: |
+          SCRATCH_HOME="$(mktemp -d)"
+          HOME="$SCRATCH_HOME" bun test
+          if [ -e "$SCRATCH_HOME/.cache/omp" ]; then
+            echo "tests wrote to \$HOME/.cache/omp — suite is not hermetic" >&2
+            exit 1
+          fi
+      - run: bun audit
