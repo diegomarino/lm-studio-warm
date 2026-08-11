@@ -6,15 +6,24 @@ import * as path from "node:path"
 import { describe, it, expect, beforeAll, afterEach, afterAll } from "bun:test"
 
 import type { LmsInstance, WarmOptions, WarmResult } from "../src/pure"
+import type { RuntimeProfile } from "../src/profile"
 
 const FAKE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "core-lmswarm-home-"))
 process.env.HOME = FAKE_HOME
 
 const { createWarmGate } = await import("../src/warm-gate")
-const { resolveOptions } = await import("../src/pure")
+const { resolveOptions, buildDefaults } = await import("../src/pure")
 /**
  * Integration suite: real createWarmGate against fake lms + loopback HTTP.
  */
+
+const TEST_PROFILE: RuntimeProfile = {
+  runtime: "test",
+  providers: ["lm-studio"],
+  logFile: "~/.cache/test-runtime/lm-studio-warm.log",
+  envBaseUrl: true,
+}
+const DEFAULTS = buildDefaults(TEST_PROFILE, FAKE_HOME)
 
 // FAKE_LMS: paste verbatim from opencode-warm/test/integration.test.ts
 const FAKE_LMS = `#!/usr/bin/env node
@@ -140,6 +149,7 @@ function makeSandbox(over: Partial<WarmOptions> = {}): Sandbox {
   const logFile = path.join(dir, "warm.log")
 
   const opts = resolveOptions(
+    DEFAULTS,
     {},
     {
       lmsPath,
@@ -340,7 +350,7 @@ describe("warm gate hardening (audit regressions)", () => {
   it("F14: a lockDir with a missing parent still warms (parent pre-created at gate construction)", async () => {
     const sb = makeSandbox()
     const gate = createWarmGate(
-      resolveOptions({}, { ...sb.opts, lockDir: path.join(sb.dir, "missing-parent", "warm.lock") }),
+      resolveOptions(DEFAULTS, {}, { ...sb.opts, lockDir: path.join(sb.dir, "missing-parent", "warm.lock") }),
     )
     const r = await gate.warm("k", serverURL)
     expect(r.ok).toBe(true)
@@ -399,7 +409,7 @@ describe("warm gate hardening (audit regressions)", () => {
   it("F18: a missing lms binary is a confirmed failure naming the attempted path and a remedy", async () => {
     const sb = makeSandbox()
     const missingLms = path.join(sb.dir, "no-such-lms")
-    const gate = createWarmGate(resolveOptions({}, { ...sb.opts, lmsPath: missingLms }))
+    const gate = createWarmGate(resolveOptions(DEFAULTS, {}, { ...sb.opts, lmsPath: missingLms }))
     const r = await gate.warm("k", serverURL)
     expect(r.ok).toBe(false)
     expect(r.confirmed).toBe(true)
@@ -412,6 +422,7 @@ describe("warm gate hardening (audit regressions)", () => {
     const notices: string[] = []
     const gate = createWarmGate(
       resolveOptions(
+        DEFAULTS,
         {},
         {
           ...sb.opts,

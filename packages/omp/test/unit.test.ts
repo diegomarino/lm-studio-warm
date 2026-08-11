@@ -3,13 +3,60 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent"
-import { resolveOptions } from "lm-studio-warm-core"
+import { getAgentDir } from "@oh-my-pi/pi-coding-agent"
+import { buildDefaults, resolveOptions } from "lm-studio-warm-core"
+import { loadConfig, OMP_PROFILE } from "../src/config"
 import { fetchLmStudioWarmModels } from "../src/discover-adapter"
 import { activateExtension } from "../src/index"
 import { createGatedStreamFn } from "../src/stream"
 
 // Hermetic scratch dir: no test in this file may touch real-$HOME state.
 const UNIT_SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), "omp-lmswarm-unit-"))
+
+const enoent = () => Object.assign(new Error("enoent"), { code: "ENOENT" })
+
+describe("OMP_PROFILE", () => {
+  it("matches the omp-shaped defaults this package used to bake into core", () => {
+    expect(OMP_PROFILE).toEqual({
+      runtime: "omp",
+      providers: ["lm-studio"],
+      logFile: "~/.cache/omp/lm-studio-warm.log",
+      envBaseUrl: true,
+    })
+  })
+})
+
+describe("loadConfig agentDir wiring", () => {
+  it("probes under the injected agentDir seam instead of the real getAgentDir", () => {
+    const seen: string[] = []
+    const r = loadConfig({
+      agentDir: "/custom/agent",
+      home: "/h",
+      env: {},
+      readFile: (p) => {
+        seen.push(p)
+        throw enoent()
+      },
+    })
+    expect(r.active).toBe(false)
+    expect(seen.length).toBeGreaterThan(0)
+    expect(seen.every((p) => p.startsWith("/custom/agent"))).toBe(true)
+  })
+
+  it("delegates to the real getAgentDir() when no agentDir override is given", () => {
+    const seen: string[] = []
+    loadConfig({
+      home: "/h",
+      env: {},
+      readFile: (p) => {
+        seen.push(p)
+        throw enoent()
+      },
+    })
+    expect(seen.length).toBeGreaterThan(0)
+    expect(seen.every((p) => p.startsWith(getAgentDir()))).toBe(true)
+  })
+})
 
 describe("fetchLmStudioWarmModels", () => {
   it("maps OpenAI /models data to ProviderModelConfig with api lm-studio-warm", async () => {
@@ -176,7 +223,7 @@ describe("extension factory", () => {
       active: true,
       sourcePath: "/tmp/lm-studio-warm.yml",
       warnings: [],
-      opts: resolveOptions({}, { eager: true, baseURL: "http://127.0.0.1:1234/v1", logFile, lockDir }),
+      opts: resolveOptions(buildDefaults(OMP_PROFILE), {}, { eager: true, baseURL: "http://127.0.0.1:1234/v1", logFile, lockDir }),
     }))
 
     expect(regs).toHaveLength(1)

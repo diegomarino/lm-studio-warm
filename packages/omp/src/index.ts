@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent"
 
-import { appendLog, createWarmGate, loadConfig, type ConfigLoadResult } from "lm-studio-warm-core"
+import { appendLog, createWarmGate, type ConfigLoadResult } from "lm-studio-warm-core"
+import { loadConfig } from "./config"
 import { fetchLmStudioWarmModels } from "./discover-adapter"
 import { createGatedStreamFn } from "./stream"
 

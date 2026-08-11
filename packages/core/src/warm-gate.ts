@@ -6,7 +6,7 @@ import * as path from "node:path"
 import {
   OK,
   BYTES_PER_MB,
-  DEFAULTS,
+  DEFAULT_EVICT_HEADROOM_MB,
   classifyPs,
   evictionCandidates,
   isMemoryPressureError,
@@ -345,9 +345,9 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
       return
     }
 
-    if (opts.evictHeadroomMB === DEFAULTS.evictHeadroomMB && (opts.contextLength > 8192 || opts.parallel > 1)) {
+    if (opts.evictHeadroomMB === DEFAULT_EVICT_HEADROOM_MB && (opts.contextLength > 8192 || opts.parallel > 1)) {
       logOnce(
-        `eviction: evictHeadroomMB is at its default ${DEFAULTS.evictHeadroomMB}MB but contextLength/parallel are large — KV cache may exceed it; raise evictHeadroomMB if loads are still refused`,
+        `eviction: evictHeadroomMB is at its default ${DEFAULT_EVICT_HEADROOM_MB}MB but contextLength/parallel are large — KV cache may exceed it; raise evictHeadroomMB if loads are still refused`,
       )
     }
 

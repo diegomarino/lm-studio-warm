@@ -1,5 +1,6 @@
 import { describe, it, expect } from "bun:test"
 import {
+  buildDefaults,
   resolveOptions,
   sanitizeOptions,
   unknownOptionKeys,
@@ -21,11 +22,12 @@ import {
   type WarmOptions,
   type LmsInstance,
 } from "../src/pure"
+import type { RuntimeProfile } from "../src/profile"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { fetchLmStudioModels } from "../src/discover"
-import { configCandidatePaths, parseConfigFile, loadConfig } from "../src/config"
+import { configCandidatePaths, parseConfigFile, loadConfigFrom } from "../src/config"
 import { createWarmGate } from "../src/warm-gate"
 import { createLmsClient, type Runner } from "../src/lms"
 
@@ -34,13 +36,60 @@ const UNIT_SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), "core-lmswarm-unit-")
 
 const MiB = 1024 * 1024
 
-function opts(over: Partial<WarmOptions> = {}): WarmOptions {
-  return resolveOptions({}, over)
+const TEST_PROFILE: RuntimeProfile = {
+  runtime: "test",
+  providers: ["lm-studio"],
+  logFile: "~/.cache/test-runtime/lm-studio-warm.log",
+  envBaseUrl: true,
 }
+
+const DEFAULTS = buildDefaults(TEST_PROFILE, "/home/fixture")
+
+function opts(over: Partial<WarmOptions> = {}): WarmOptions {
+  return resolveOptions(DEFAULTS, {}, over)
+}
+
+describe("buildDefaults", () => {
+  it("computes lmsPath, logFile from the passed home — no module-load os.homedir() capture", () => {
+    const home1 = "/home/one"
+    const home2 = "/home/two"
+    const d1 = buildDefaults(TEST_PROFILE, home1)
+    const d2 = buildDefaults(TEST_PROFILE, home2)
+    expect(d1.lmsPath.startsWith(home1) || d1.lmsPath === "lms").toBe(true)
+    expect(d2.lmsPath.startsWith(home2) || d2.lmsPath === "lms").toBe(true)
+    expect(d1.logFile).toBe(path.join(home1, ".cache/test-runtime/lm-studio-warm.log"))
+    expect(d2.logFile).toBe(path.join(home2, ".cache/test-runtime/lm-studio-warm.log"))
+  })
+
+  it("uses the profile's providers and logFile", () => {
+    const d = buildDefaults(
+      { runtime: "pi", providers: ["lm-studio-pi"], logFile: "~/.cache/pi/lm-studio-warm.log", envBaseUrl: false },
+      "/home/u",
+    )
+    expect(d.providers).toEqual(["lm-studio-pi"])
+    expect(d.logFile).toBe("/home/u/.cache/pi/lm-studio-warm.log")
+  })
+
+  it("always uses the shared cross-runtime lockDir regardless of profile", () => {
+    const home = "/home/shared"
+    const dOmp = buildDefaults(TEST_PROFILE, home)
+    const dPi = buildDefaults(
+      { runtime: "pi", providers: ["lm-studio-pi"], logFile: "~/.cache/pi/lm-studio-warm.log", envBaseUrl: false },
+      home,
+    )
+    expect(dOmp.lockDir).toBe(path.join(home, ".cache/lm-studio-warm/lock"))
+    expect(dPi.lockDir).toBe(path.join(home, ".cache/lm-studio-warm/lock"))
+  })
+
+  it("defaults home to os.homedir() when omitted", () => {
+    const d = buildDefaults(TEST_PROFILE)
+    expect(d.lockDir).toBe(path.join(os.homedir(), ".cache/lm-studio-warm/lock"))
+  })
+})
 
 describe("resolveOptions", () => {
   it("applies defaults when nothing is provided", () => {
-    const o = resolveOptions({}, undefined)
+    const o = resolveOptions(DEFAULTS, {}, undefined)
     expect(o.providers).toEqual(["lm-studio"])
     expect(o.failMode).toBe("hybrid")
     expect(o.ttlSeconds).toBe(0)
@@ -49,51 +98,52 @@ describe("resolveOptions", () => {
   })
 
   it("file options override defaults, plugin options override file", () => {
-    const o = resolveOptions({ parallel: 2, ttlSeconds: 10 }, { parallel: 5 })
+    const o = resolveOptions(DEFAULTS, { parallel: 2, ttlSeconds: 10 }, { parallel: 5 })
     expect(o.parallel).toBe(5)
     expect(o.ttlSeconds).toBe(10)
   })
 
   it("plugin failMode overrides file failMode", () => {
-    expect(resolveOptions({ failMode: "closed" }, { failMode: "open" }).failMode).toBe("open")
+    expect(resolveOptions(DEFAULTS, { failMode: "closed" }, { failMode: "open" }).failMode).toBe("open")
   })
 })
 
 describe("unknownOptionKeys", () => {
   it("lists keys the plugin does not know", () => {
-    expect(unknownOptionKeys({ verifycachems: 1, failMode: "open" })).toEqual(["verifycachems"])
+    expect(unknownOptionKeys({ verifycachems: 1, failMode: "open" }, DEFAULTS)).toEqual(["verifycachems"])
   })
 
   it("returns empty for known keys only, or an empty object", () => {
-    expect(unknownOptionKeys({})).toEqual([])
-    expect(unknownOptionKeys({ ttlSeconds: 5, eager: false })).toEqual([])
+    expect(unknownOptionKeys({}, DEFAULTS)).toEqual([])
+    expect(unknownOptionKeys({ ttlSeconds: 5, eager: false }, DEFAULTS)).toEqual([])
   })
 })
 
 describe("sanitizeOptions", () => {
   it("passes a valid config through unchanged with no warnings", () => {
-    const { opts: o, warnings } = sanitizeOptions(resolveOptions({}, { failMode: "closed", parallel: 2 }))
+    const { opts: o, warnings } = sanitizeOptions(resolveOptions(DEFAULTS, {}, { failMode: "closed", parallel: 2 }), DEFAULTS)
     expect(warnings).toEqual([])
     expect(o.failMode).toBe("closed")
     expect(o.parallel).toBe(2)
   })
 
   it("falls back to hybrid on unrecognized failMode", () => {
-    const { opts: o, warnings } = sanitizeOptions(resolveOptions({ failMode: "Hybrid" as never }, null))
+    const { opts: o, warnings } = sanitizeOptions(resolveOptions(DEFAULTS, { failMode: "Hybrid" as never }, null), DEFAULTS)
     expect(o.failMode).toBe("hybrid")
     expect(warnings).toHaveLength(1)
     expect(warnings[0]).toContain("failMode")
   })
 
   it("resets providers to default when not a non-empty string array", () => {
-    const { opts: o, warnings } = sanitizeOptions(resolveOptions({ providers: "lm-studio" as never }, null))
+    const { opts: o, warnings } = sanitizeOptions(resolveOptions(DEFAULTS, { providers: "lm-studio" as never }, null), DEFAULTS)
     expect(o.providers).toEqual(["lm-studio"])
     expect(warnings).toHaveLength(1)
   })
 
   it("resets negative or non-numeric numeric options to their defaults", () => {
     const { opts: o, warnings } = sanitizeOptions(
-      resolveOptions({ verifyCacheMs: -5, loadTimeoutMs: "big" as never }, null),
+      resolveOptions(DEFAULTS, { verifyCacheMs: -5, loadTimeoutMs: "big" as never }, null),
+      DEFAULTS,
     )
     expect(o.verifyCacheMs).toBe(30_000)
     expect(o.loadTimeoutMs).toBe(900_000)
@@ -101,14 +151,14 @@ describe("sanitizeOptions", () => {
   })
 
   it("resets wrong-typed booleans and empty strings to their defaults", () => {
-    const { opts: o, warnings } = sanitizeOptions(resolveOptions({ eager: "yes" as never, lmsPath: "" }, null))
+    const { opts: o, warnings } = sanitizeOptions(resolveOptions(DEFAULTS, { eager: "yes" as never, lmsPath: "" }, null), DEFAULTS)
     expect(o.eager).toBe(true)
     expect(o.lmsPath).not.toBe("")
     expect(warnings).toHaveLength(2)
   })
 
   it("resets a non-string-array evictProtect to the default empty list", () => {
-    const { opts: o, warnings } = sanitizeOptions(resolveOptions({ evictProtect: [1, "ok"] as never }, null))
+    const { opts: o, warnings } = sanitizeOptions(resolveOptions(DEFAULTS, { evictProtect: [1, "ok"] as never }, null), DEFAULTS)
     expect(o.evictProtect).toEqual([])
     expect(warnings).toHaveLength(1)
   })
@@ -116,6 +166,7 @@ describe("sanitizeOptions", () => {
   it("drops a non-object perModel entry and keeps valid sibling entries", () => {
     const { opts: o, warnings } = sanitizeOptions(
       resolveOptions(
+        DEFAULTS,
         {
           perModel: {
             good: { ttlSeconds: 10 },
@@ -124,6 +175,7 @@ describe("sanitizeOptions", () => {
         },
         null,
       ),
+      DEFAULTS,
     )
     expect(o.perModel.good).toEqual({ ttlSeconds: 10 })
     expect(o.perModel.bad).toBeUndefined()
@@ -133,6 +185,7 @@ describe("sanitizeOptions", () => {
   it("drops invalid/unknown perModel fields but keeps valid ones", () => {
     const { opts: o, warnings } = sanitizeOptions(
       resolveOptions(
+        DEFAULTS,
         {
           perModel: {
             m: { ttlSeconds: 5, parallel: -1 as never, nope: 1 as never } as never,
@@ -140,13 +193,14 @@ describe("sanitizeOptions", () => {
         },
         null,
       ),
+      DEFAULTS,
     )
     expect(o.perModel.m).toEqual({ ttlSeconds: 5 })
     expect(warnings.length).toBeGreaterThanOrEqual(2)
   })
 
   it("resets evictMaxVictims when negative", () => {
-    const { opts: o, warnings } = sanitizeOptions(resolveOptions({ evictMaxVictims: -1 }, null))
+    const { opts: o, warnings } = sanitizeOptions(resolveOptions(DEFAULTS, { evictMaxVictims: -1 }, null), DEFAULTS)
     expect(o.evictMaxVictims).toBe(8)
     expect(warnings).toHaveLength(1)
   })
@@ -374,19 +428,36 @@ describe("eviction pure", () => {
   })
 })
 describe("configCandidatePaths", () => {
-  it("defaults to ~/.omp/agent lm-studio-warm.{yml,yaml,json}", () => {
+  it("probes each candidate dir for lm-studio-warm.{yml,yaml,json} in order", () => {
     const home = "/tmp/fake-home"
-    expect(configCandidatePaths(home, {})).toEqual([
-      path.join(home, ".omp/agent/lm-studio-warm.yml"),
-      path.join(home, ".omp/agent/lm-studio-warm.yaml"),
-      path.join(home, ".omp/agent/lm-studio-warm.json"),
+    expect(configCandidatePaths(["/custom/agent"], TEST_PROFILE, home)).toEqual([
+      "/custom/agent/lm-studio-warm.yml",
+      "/custom/agent/lm-studio-warm.yaml",
+      "/custom/agent/lm-studio-warm.json",
     ])
   })
 
-  it("honors PI_CODING_AGENT_DIR over default agent dir", () => {
+  it("expands a leading ~ in a candidate dir against home", () => {
     const home = "/tmp/fake-home"
-    const paths = configCandidatePaths(home, { PI_CODING_AGENT_DIR: "/custom/agent" })
-    expect(paths[0]).toBe("/custom/agent/lm-studio-warm.yml")
+    const paths = configCandidatePaths(["~/.agent"], TEST_PROFILE, home)
+    expect(paths[0]).toBe(path.join(home, ".agent/lm-studio-warm.yml"))
+  })
+
+  it("walks multiple candidate dirs, each dir's full filename set before the next dir", () => {
+    const paths = configCandidatePaths(["/a", "/b"], TEST_PROFILE, "/home/u")
+    expect(paths).toEqual([
+      "/a/lm-studio-warm.yml",
+      "/a/lm-studio-warm.yaml",
+      "/a/lm-studio-warm.json",
+      "/b/lm-studio-warm.yml",
+      "/b/lm-studio-warm.yaml",
+      "/b/lm-studio-warm.json",
+    ])
+  })
+
+  it("honors a profile-supplied configNames override", () => {
+    const profile: RuntimeProfile = { ...TEST_PROFILE, configNames: ["custom.yml"] }
+    expect(configCandidatePaths(["/a"], profile, "/home/u")).toEqual(["/a/custom.yml"])
   })
 })
 
@@ -417,11 +488,16 @@ describe("parseConfigFile", () => {
   })
 })
 
-describe("loadConfig", () => {
+const AGENT_DIR = "/agent"
+
+function loadFrom(over: Partial<Parameters<typeof loadConfigFrom>[0]> = {}) {
+  return loadConfigFrom({ candidateDirs: [AGENT_DIR], profile: TEST_PROFILE, env: {}, ...over })
+}
+
+describe("loadConfigFrom", () => {
   it("missing file → inactive", () => {
-    const r = loadConfig({
+    const r = loadFrom({
       home: "/no/such/home",
-      env: {},
       readFile: () => {
         throw Object.assign(new Error("enoent"), { code: "ENOENT" })
       },
@@ -431,9 +507,8 @@ describe("loadConfig", () => {
   })
 
   it("enabled:false → inactive disabled", () => {
-    const r = loadConfig({
+    const r = loadFrom({
       home: "/h",
-      env: {},
       readFile: (p) => {
         if (p.endsWith(".yml")) return "enabled: false\n"
         throw Object.assign(new Error("enoent"), { code: "ENOENT" })
@@ -443,10 +518,9 @@ describe("loadConfig", () => {
     if (!r.active) expect(r.reason).toBe("disabled")
   })
 
-  it("present file → active with sanitized defaults merged", () => {
-    const r = loadConfig({
+  it("present file → active with sanitized defaults merged, using the injected profile's providers", () => {
+    const r = loadFrom({
       home: "/h",
-      env: {},
       readFile: (p) => {
         if (p.endsWith(".yml")) return "failMode: closed\nunknownKey: 1\n"
         throw Object.assign(new Error("enoent"), { code: "ENOENT" })
@@ -459,9 +533,67 @@ describe("loadConfig", () => {
       expect(r.warnings.some((w) => w.includes("unknownKey"))).toBe(true)
     }
   })
+
+  it("probes each candidateDir in order, falling through on ENOENT", () => {
+    const r = loadFrom({
+      candidateDirs: ["/first", "/second"],
+      home: "/h",
+      readFile: (p) => {
+        if (p.startsWith("/second") && p.endsWith(".yml")) return "failMode: closed\n"
+        throw Object.assign(new Error("enoent"), { code: "ENOENT" })
+      },
+    })
+    expect(r.active).toBe(true)
+    if (r.active) {
+      expect(r.sourcePath).toBe("/second/lm-studio-warm.yml")
+      expect(r.opts.failMode).toBe("closed")
+    }
+  })
+
+  it("uses a different runtime's providers/logFile when given a different profile", () => {
+    const piProfile: RuntimeProfile = {
+      runtime: "pi",
+      providers: ["lm-studio-pi"],
+      logFile: "~/.cache/pi/lm-studio-warm.log",
+      envBaseUrl: false,
+    }
+    const r = loadConfigFrom({
+      candidateDirs: [AGENT_DIR],
+      profile: piProfile,
+      home: "/h",
+      env: {},
+      readFile: () => {
+        throw Object.assign(new Error("enoent"), { code: "ENOENT" })
+      },
+    })
+    expect(r.active).toBe(false)
+    if (!r.active) expect(r.logFile).toBe("/h/.cache/pi/lm-studio-warm.log")
+  })
+
+  it("honors LM_STUDIO_BASE_URL only when profile.envBaseUrl is true", () => {
+    const withDefaultBaseUrl = (p: string) => {
+      if (p.endsWith(".yml")) return "failMode: closed\n"
+      throw Object.assign(new Error("enoent"), { code: "ENOENT" })
+    }
+
+    const enabled = loadFrom({ home: "/h", env: { LM_STUDIO_BASE_URL: "http://10.0.0.5:1234/v1" }, readFile: withDefaultBaseUrl })
+    expect(enabled.active).toBe(true)
+    if (enabled.active) expect(enabled.opts.baseURL).toBe("http://10.0.0.5:1234/v1")
+
+    const disabledProfile: RuntimeProfile = { ...TEST_PROFILE, envBaseUrl: false }
+    const disabled = loadConfigFrom({
+      candidateDirs: [AGENT_DIR],
+      profile: disabledProfile,
+      home: "/h",
+      env: { LM_STUDIO_BASE_URL: "http://10.0.0.5:1234/v1" },
+      readFile: withDefaultBaseUrl,
+    })
+    expect(disabled.active).toBe(true)
+    if (disabled.active) expect(disabled.opts.baseURL).toBe("http://127.0.0.1:1234/v1")
+  })
 })
 
-describe("loadConfig two-tier safety", () => {
+describe("loadConfigFrom two-tier safety", () => {
   const enoent = () => Object.assign(new Error("enoent"), { code: "ENOENT" })
   const withYml = (content: string) => (p: string) => {
     if (p.endsWith(".yml")) return content
@@ -469,7 +601,7 @@ describe("loadConfig two-tier safety", () => {
   }
 
   it("enabled: no (YAML 1.2 string) deactivates with a named diagnostic instead of repairing to true", () => {
-    const r = loadConfig({ home: "/h", env: {}, readFile: withYml("enabled: no\n") })
+    const r = loadFrom({ home: "/h", readFile: withYml("enabled: no\n") })
     expect(r.active).toBe(false)
     if (!r.active) {
       expect(r.reason).toBe("invalid")
@@ -479,13 +611,13 @@ describe("loadConfig two-tier safety", () => {
   })
 
   it('quoted enabled: "false" deactivates as invalid (not silently active)', () => {
-    const r = loadConfig({ home: "/h", env: {}, readFile: withYml('enabled: "false"\n') })
+    const r = loadFrom({ home: "/h", readFile: withYml('enabled: "false"\n') })
     expect(r.active).toBe(false)
     if (!r.active) expect(r.reason).toBe("invalid")
   })
 
   it("a syntactically broken file containing enabled: false deactivates with the parse error surfaced", () => {
-    const r = loadConfig({ home: "/h", env: {}, readFile: withYml("enabled: false\n  bad: [unclosed\n") })
+    const r = loadFrom({ home: "/h", readFile: withYml("enabled: false\n  bad: [unclosed\n") })
     expect(r.active).toBe(false)
     if (!r.active) {
       expect(r.reason).toBe("invalid")
@@ -494,7 +626,7 @@ describe("loadConfig two-tier safety", () => {
   })
 
   it("tuning-tier mistakes still repair to defaults with warnings (resilience preserved)", () => {
-    const r = loadConfig({ home: "/h", env: {}, readFile: withYml("failMode: Wrong\nttlSeconds: -4\n") })
+    const r = loadFrom({ home: "/h", readFile: withYml("failMode: Wrong\nttlSeconds: -4\n") })
     expect(r.active).toBe(true)
     if (r.active) {
       expect(r.opts.failMode).toBe("hybrid")
@@ -504,9 +636,8 @@ describe("loadConfig two-tier safety", () => {
   })
 
   it("a found-but-unreadable config is reason unreadable, keeps its warning, and names the file", () => {
-    const r = loadConfig({
+    const r = loadFrom({
       home: "/h",
-      env: {},
       readFile: (p) => {
         if (p.endsWith(".yml")) throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
         throw enoent()
@@ -521,9 +652,8 @@ describe("loadConfig two-tier safety", () => {
   })
 
   it("expands ~ in user-supplied lmsPath/logFile/lockDir", () => {
-    const r = loadConfig({
+    const r = loadFrom({
       home: "/home/u",
-      env: {},
       readFile: withYml("lmsPath: ~/.lmstudio/bin/lms\nlogFile: ~/logs/warm.log\nlockDir: ~/locks/warm.lock\n"),
     })
     expect(r.active).toBe(true)
@@ -535,9 +665,8 @@ describe("loadConfig two-tier safety", () => {
   })
 
   it("disabled arm resolves the configured (tilde-expanded) logFile for the inactive notice", () => {
-    const r = loadConfig({
+    const r = loadFrom({
       home: "/home/u",
-      env: {},
       readFile: withYml("enabled: false\nlogFile: ~/custom/warm.log\n"),
     })
     expect(r.active).toBe(false)
@@ -626,6 +755,7 @@ describe("createWarmGate process hygiene", () => {
       const dir = fs.mkdtempSync(path.join(UNIT_SANDBOX, "gate-"))
       createWarmGate(
         resolveOptions(
+          DEFAULTS,
           {},
           {
             logFile: path.join(dir, "warm.log"),

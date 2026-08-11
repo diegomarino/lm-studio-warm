@@ -1,6 +1,7 @@
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
+import type { RuntimeProfile } from "./profile"
 
 export type PerModel = { ttlSeconds?: number; parallel?: number; contextLength?: number }
 
@@ -55,48 +56,71 @@ export type PsCheck =
 
 export type EvictionPlan = { victims: LmsInstance[]; fitsAfter: boolean }
 
-const HOME = os.homedir()
-
 export const RAM_BUDGET_AUTO_FRACTION = 0.9
 export const BYTES_PER_MB = 1024 * 1024
+/** evictHeadroomMB's built-in default — shared with the "still at default" heuristic in warm-gate. */
+export const DEFAULT_EVICT_HEADROOM_MB = 4096
 
 export const OK: WarmResult = { ok: true, confirmed: false, reason: "" }
 
-export const DEFAULTS: WarmOptions = {
-  enabled: true,
-  providers: ["lm-studio"],
-  lmsPath: fs.existsSync(path.join(HOME, ".lmstudio/bin/lms")) ? path.join(HOME, ".lmstudio/bin/lms") : "lms",
-  baseURL: "http://127.0.0.1:1234/v1",
-  ttlSeconds: 0,
-  parallel: 0,
-  contextLength: 0,
-  perModel: {},
-  verifyCacheMs: 30_000,
-  retryCooldownMs: 60_000,
-  loadTimeoutMs: 900_000,
-  serverStartTimeoutMs: 90_000,
-  lockWaitTimeoutMs: 1_200_000,
-  failMode: "hybrid",
-  reconcileDuplicates: true,
-  launchAppFallback: true,
-  eager: true,
-  evictOnPressure: false,
-  ramBudgetMB: 0,
-  evictHeadroomMB: 4096,
-  evictProtect: [],
-  evictMaxVictims: 8,
-  logFile: path.join(HOME, ".cache/omp/lm-studio-warm.log"),
-  lockDir: path.join(HOME, ".cache/omp/lm-studio-warm.lock"),
+/** Expand a leading `~` (or `~/...`) against `home`; any other path passes through unchanged. */
+export function expandHome(p: string, home: string): string {
+  if (p === "~") return home
+  if (p.startsWith("~/")) return path.join(home, p.slice(2))
+  return p
 }
 
-/** Merge config in precedence order: DEFAULTS < file options < plugin options. */
-export function resolveOptions(fileOpts: Partial<WarmOptions>, pluginOpts?: Partial<WarmOptions> | null): WarmOptions {
-  return { ...DEFAULTS, ...fileOpts, ...(pluginOpts ?? {}) }
+/**
+ * Build the runtime+host-specific defaults. Computed lazily from the passed
+ * `home` — never from a module-load `os.homedir()` capture, so tests (and
+ * hosts) can inject a hermetic home without mutating process.env.HOME.
+ *
+ * `lockDir` is intentionally the same across every profile: the lock is a
+ * cross-runtime resource (one physical LM Studio instance), so every wiring
+ * package must contend on the same path regardless of `runtime`.
+ */
+export function buildDefaults(profile: RuntimeProfile, home: string = os.homedir()): WarmOptions {
+  const bundledLms = path.join(home, ".lmstudio/bin/lms")
+  return {
+    enabled: true,
+    providers: [...profile.providers],
+    lmsPath: fs.existsSync(bundledLms) ? bundledLms : "lms",
+    baseURL: "http://127.0.0.1:1234/v1",
+    ttlSeconds: 0,
+    parallel: 0,
+    contextLength: 0,
+    perModel: {},
+    verifyCacheMs: 30_000,
+    retryCooldownMs: 60_000,
+    loadTimeoutMs: 900_000,
+    serverStartTimeoutMs: 90_000,
+    lockWaitTimeoutMs: 1_200_000,
+    failMode: "hybrid",
+    reconcileDuplicates: true,
+    launchAppFallback: true,
+    eager: true,
+    evictOnPressure: false,
+    ramBudgetMB: 0,
+    evictHeadroomMB: DEFAULT_EVICT_HEADROOM_MB,
+    evictProtect: [],
+    evictMaxVictims: 8,
+    logFile: expandHome(profile.logFile, home),
+    lockDir: path.join(home, ".cache/lm-studio-warm/lock"),
+  }
+}
+
+/** Merge config in precedence order: defaults < file options < plugin options. */
+export function resolveOptions(
+  defaults: WarmOptions,
+  fileOpts: Partial<WarmOptions>,
+  pluginOpts?: Partial<WarmOptions> | null,
+): WarmOptions {
+  return { ...defaults, ...fileOpts, ...(pluginOpts ?? {}) }
 }
 
 /** Keys in a raw options object that the plugin does not know. */
-export function unknownOptionKeys(raw: Record<string, unknown>): string[] {
-  return Object.keys(raw).filter((k) => !(k in DEFAULTS))
+export function unknownOptionKeys(raw: Record<string, unknown>, defaults: WarmOptions): string[] {
+  return Object.keys(raw).filter((k) => !(k in defaults))
 }
 
 const NUMERIC_KEYS = [
@@ -116,13 +140,13 @@ const NUMERIC_KEYS = [
 const BOOLEAN_KEYS = ["enabled", "reconcileDuplicates", "launchAppFallback", "eager", "evictOnPressure"] as const
 const STRING_KEYS = ["lmsPath", "baseURL", "logFile", "lockDir"] as const
 
-/** Repair invalid option VALUES back to their defaults, collecting one warning per repair. */
-export function sanitizeOptions(o: WarmOptions): { opts: WarmOptions; warnings: string[] } {
+/** Repair invalid option VALUES back to `defaults`, collecting one warning per repair. */
+export function sanitizeOptions(o: WarmOptions, defaults: WarmOptions): { opts: WarmOptions; warnings: string[] } {
   const warnings: string[] = []
   const out: WarmOptions = { ...o }
   const fix = (key: keyof WarmOptions, why: string) => {
-    warnings.push(`${key} ${why} — using default ${JSON.stringify(DEFAULTS[key])}`)
-    ;(out as Record<string, unknown>)[key] = DEFAULTS[key]
+    warnings.push(`${key} ${why} — using default ${JSON.stringify(defaults[key])}`)
+    ;(out as Record<string, unknown>)[key] = defaults[key]
   }
 
   if (!["open", "closed", "hybrid"].includes(out.failMode)) fix("failMode", `"${out.failMode}" is not open|closed|hybrid`)
