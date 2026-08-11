@@ -201,25 +201,33 @@ describe("extension factory", () => {
     expect(onCalls).toEqual([])
   })
 
-  it("active config: this task's stub logs one line and does not registerProvider (real wiring lands in the next commit)", () => {
+  // Full coverage of the active path (registerProvider shape, discovery,
+  // eager warm, lock release) lives in provider.test.ts, which sets up a
+  // real loopback HTTP server + fake lms binary. This is a lightweight
+  // smoke test that the active path reaches registerProvider/on at all.
+  it("active config: registers the lm-studio provider and session handlers (real wiring, not the earlier stub)", async () => {
     const calls: unknown[] = []
-    const onCalls: unknown[] = []
+    const onCalls: string[] = []
     const { logFile, lockDir } = sandboxPaths()
 
     const pi = {
       registerProvider: (...args: unknown[]) => calls.push(args),
-      on: (...args: unknown[]) => onCalls.push(args),
+      on: (event: string) => onCalls.push(event),
     } as unknown as ExtensionAPI
 
-    activateExtension(pi, () => ({
+    // Deliberately unreachable loopback port (discard, RFC 863): discovery
+    // fails fast and falls back to an empty model list without depending on
+    // any real LM Studio instance on the host.
+    await activateExtension(pi, () => ({
       active: true,
       sourcePath: "/tmp/lm-studio-warm.yml",
       warnings: [],
-      opts: resolveOptions(buildDefaults(PI_PROFILE), {}, { eager: true, baseURL: "http://127.0.0.1:1234/v1", logFile, lockDir }),
+      opts: resolveOptions(buildDefaults(PI_PROFILE), {}, { eager: true, baseURL: "http://127.0.0.1:9/v1", logFile, lockDir }),
     }))
 
-    expect(calls).toEqual([])
-    expect(onCalls).toEqual([])
-    expect(fs.readFileSync(logFile, "utf8")).toContain("active: provider registration lands in the next commit")
+    expect(calls).toHaveLength(1)
+    expect((calls[0] as [{ id: string }])[0].id).toBe("lm-studio")
+    expect(onCalls).toEqual(["session_start", "session_shutdown"])
+    expect(fs.readFileSync(logFile, "utf8")).toContain("active from /tmp/lm-studio-warm.yml")
   })
 })

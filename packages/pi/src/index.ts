@@ -1,7 +1,10 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent"
+import { createProvider } from "@earendil-works/pi-ai"
 
-import { appendLog } from "lm-studio-warm-core"
+import { appendLog, createWarmGate, fetchLmStudioModels } from "lm-studio-warm-core"
 import { loadPiConfig } from "./config"
+import { toPiModels } from "./models"
+import { createGatedProviderStreams } from "./stream"
 
 /** One user-facing line for a batch of config warnings; the first names its file. */
 function summarizeWarnings(warnings: string[], logFile: string): string {
@@ -11,7 +14,7 @@ function summarizeWarnings(warnings: string[], logFile: string): string {
   return `${prefixed}${rest > 0 ? ` (+${rest} more — see ${logFile})` : ""}`
 }
 
-export function activateExtension(pi: ExtensionAPI, load: typeof loadPiConfig = loadPiConfig): void {
+export async function activateExtension(pi: ExtensionAPI, load: typeof loadPiConfig = loadPiConfig): Promise<void> {
   const loaded = load()
 
   if (!loaded.active) {
@@ -38,18 +41,77 @@ export function activateExtension(pi: ExtensionAPI, load: typeof loadPiConfig = 
   }
 
   const opts = loaded.opts
+  const warnings = loaded.warnings
 
-  for (const warning of loaded.warnings) {
+  for (const warning of warnings) {
     appendLog(opts.logFile, `config warning: ${warning}`)
   }
 
-  // Stub: provider registration, gated streams, eager warm and session
-  // events land in the next commit — this task only wires the inactive
-  // paths, so an active config is acknowledged with a single log line and
-  // otherwise left untouched.
-  appendLog(opts.logFile, "active: provider registration lands in the next commit")
+  appendLog(
+    opts.logFile,
+    `active from ${loaded.sourcePath} (providers=${opts.providers.join(",")} failMode=${opts.failMode} eager=${opts.eager})`,
+  )
+
+  const apiKey = process.env.LM_STUDIO_API_KEY?.trim() || undefined
+
+  let uiCtx: ExtensionContext | null = null
+
+  const gate = createWarmGate(opts, {
+    notify: (m, t) => {
+      if (uiCtx?.hasUI) uiCtx.ui.notify(m, t)
+    },
+  })
+
+  const streams = createGatedProviderStreams({
+    warm: (key, baseURL) => gate.warm(key, baseURL),
+    failMode: opts.failMode,
+    logFile: opts.logFile,
+    baseURL: opts.baseURL,
+    getUi: () => (uiCtx?.hasUI ? uiCtx.ui : null),
+  })
+
+  const discover = () => fetchLmStudioModels(opts.baseURL, apiKey, fetch)
+  const initial = toPiModels(await discover().catch(() => []), opts.baseURL)
+
+  pi.registerProvider(
+    createProvider({
+      id: "lm-studio",
+      name: "LM Studio (warm)",
+      baseUrl: opts.baseURL,
+      auth: {
+        apiKey: {
+          name: "LM Studio API key",
+          resolve: async () => ({ auth: { apiKey: apiKey ?? "lm-studio" }, source: "lm-studio-warm" }),
+        },
+      },
+      models: initial,
+      fetchModels: async () => toPiModels(await discover(), opts.baseURL), // full replace on refreshModels(context)
+      api: streams,
+    }),
+  )
+
+  pi.on("session_start", async (_event, ctx: ExtensionContext) => {
+    uiCtx = ctx
+
+    for (const warning of warnings) {
+      if (ctx.hasUI) ctx.ui.notify(summarizeWarnings([warning], opts.logFile), "warning")
+    }
+
+    if (opts.eager) {
+      // Stock pi has no smol/secondary role — only the current model can be
+      // eagerly warmed (Spec adaptation note 3).
+      const m = ctx.model
+      if (m && m.provider === "lm-studio") {
+        void gate.warm(m.id, m.baseUrl?.startsWith("http") ? m.baseUrl : opts.baseURL)
+      }
+    }
+  })
+
+  pi.on("session_shutdown", async () => {
+    gate.releaseLockIfOurs()
+  })
 }
 
 export default async function lmStudioWarm(pi: ExtensionAPI): Promise<void> {
-  activateExtension(pi, loadPiConfig)
+  await activateExtension(pi, loadPiConfig)
 }
