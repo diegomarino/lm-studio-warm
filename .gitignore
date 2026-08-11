@@ -5,3 +5,5 @@ dist/
 .cache/
 coverage/
 *.tsbuildinfo
+# scratch recordings (the shipped demo cast demo-lm-studio-warm.cast IS tracked)
+demo-test.cast

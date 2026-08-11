@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect } from "bun:test"
 import {
   resolveOptions,
   sanitizeOptions,
@@ -21,10 +21,19 @@ import {
   type WarmOptions,
   type LmsInstance,
 } from "../src/pure"
+import * as fs from "node:fs"
+import * as os from "node:os"
 import * as path from "node:path"
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent"
+import { fetchLmStudioWarmModels } from "../src/discover"
+import { activateExtension } from "../src/index"
 import { configCandidatePaths, parseConfigFile, loadConfig } from "../src/config"
+import { createGatedStreamFn } from "../src/stream"
+import { createWarmGate } from "../src/warm-gate"
 import { createLmsClient, type Runner } from "../src/lms"
 
+// Hermetic scratch dir: no test in this file may touch real-$HOME state.
+const UNIT_SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), "omp-lmswarm-unit-"))
 
 const MiB = 1024 * 1024
 
@@ -454,3 +463,358 @@ describe("loadConfig", () => {
     }
   })
 })
+
+describe("loadConfig two-tier safety", () => {
+  const enoent = () => Object.assign(new Error("enoent"), { code: "ENOENT" })
+  const withYml = (content: string) => (p: string) => {
+    if (p.endsWith(".yml")) return content
+    throw enoent()
+  }
+
+  it("enabled: no (YAML 1.2 string) deactivates with a named diagnostic instead of repairing to true", () => {
+    const r = loadConfig({ home: "/h", env: {}, readFile: withYml("enabled: no\n") })
+    expect(r.active).toBe(false)
+    if (!r.active) {
+      expect(r.reason).toBe("invalid")
+      expect(r.warnings.join("\n")).toContain("INACTIVE")
+      expect(r.warnings.join("\n")).toContain("enabled")
+    }
+  })
+
+  it('quoted enabled: "false" deactivates as invalid (not silently active)', () => {
+    const r = loadConfig({ home: "/h", env: {}, readFile: withYml('enabled: "false"\n') })
+    expect(r.active).toBe(false)
+    if (!r.active) expect(r.reason).toBe("invalid")
+  })
+
+  it("a syntactically broken file containing enabled: false deactivates with the parse error surfaced", () => {
+    const r = loadConfig({ home: "/h", env: {}, readFile: withYml("enabled: false\n  bad: [unclosed\n") })
+    expect(r.active).toBe(false)
+    if (!r.active) {
+      expect(r.reason).toBe("invalid")
+      expect(r.warnings.join("\n")).toMatch(/parse/i)
+    }
+  })
+
+  it("tuning-tier mistakes still repair to defaults with warnings (resilience preserved)", () => {
+    const r = loadConfig({ home: "/h", env: {}, readFile: withYml("failMode: Wrong\nttlSeconds: -4\n") })
+    expect(r.active).toBe(true)
+    if (r.active) {
+      expect(r.opts.failMode).toBe("hybrid")
+      expect(r.opts.ttlSeconds).toBe(0)
+      expect(r.warnings.length).toBeGreaterThanOrEqual(2)
+    }
+  })
+
+  it("a found-but-unreadable config is reason unreadable, keeps its warning, and names the file", () => {
+    const r = loadConfig({
+      home: "/h",
+      env: {},
+      readFile: (p) => {
+        if (p.endsWith(".yml")) throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+        throw enoent()
+      },
+    })
+    expect(r.active).toBe(false)
+    if (!r.active) {
+      expect(r.reason).toBe("unreadable")
+      expect(r.warnings.join("\n")).toContain("lm-studio-warm.yml")
+      expect(r.warnings.join("\n")).toContain("EACCES")
+    }
+  })
+
+  it("expands ~ in user-supplied lmsPath/logFile/lockDir", () => {
+    const r = loadConfig({
+      home: "/home/u",
+      env: {},
+      readFile: withYml("lmsPath: ~/.lmstudio/bin/lms\nlogFile: ~/logs/warm.log\nlockDir: ~/locks/warm.lock\n"),
+    })
+    expect(r.active).toBe(true)
+    if (r.active) {
+      expect(r.opts.lmsPath).toBe("/home/u/.lmstudio/bin/lms")
+      expect(r.opts.logFile).toBe("/home/u/logs/warm.log")
+      expect(r.opts.lockDir).toBe("/home/u/locks/warm.lock")
+    }
+  })
+
+  it("disabled arm resolves the configured (tilde-expanded) logFile for the inactive notice", () => {
+    const r = loadConfig({
+      home: "/home/u",
+      env: {},
+      readFile: withYml("enabled: false\nlogFile: ~/custom/warm.log\n"),
+    })
+    expect(r.active).toBe(false)
+    if (!r.active) {
+      expect(r.reason).toBe("disabled")
+      expect(r.logFile).toBe("/home/u/custom/warm.log")
+    }
+  })
+})
+
+describe("fetchLmStudioWarmModels", () => {
+  it("maps OpenAI /models data to ProviderModelConfig with api lm-studio-warm", async () => {
+    const fetchImpl = async () =>
+      new Response(JSON.stringify({ data: [{ id: "qwen3" }, { id: "other" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+
+    const models = await fetchLmStudioWarmModels("http://127.0.0.1:1234/v1", undefined, fetchImpl as unknown as typeof fetch)
+    expect(models).toHaveLength(2)
+    expect(models[0]).toMatchObject({
+      id: "qwen3",
+      name: "qwen3",
+      api: "lm-studio-warm",
+      reasoning: false,
+      input: ["text"],
+    })
+  })
+
+  it("returns [] on HTTP failure", async () => {
+    const fetchImpl = async () => new Response("nope", { status: 500 })
+    await expect(
+      fetchLmStudioWarmModels("http://127.0.0.1:9/v1", undefined, fetchImpl as unknown as typeof fetch),
+    ).resolves.toEqual([])
+  })
+
+  it("enriches from native /api/v0/models: vision models get image input, small models keep native context", async () => {
+    const fetchImpl = (async (url: unknown) => {
+      const u = String(url)
+      if (u.endsWith("/api/v0/models")) {
+        return new Response(
+          JSON.stringify({
+            data: [
+              { id: "seer", type: "vlm", max_context_length: 32768 },
+              { id: "tiny", type: "llm", max_context_length: 8192 },
+              { id: "embed", type: "embeddings", max_context_length: 512 },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )
+      }
+      return new Response(JSON.stringify({ data: [{ id: "seer" }, { id: "tiny" }, { id: "embed" }, { id: "mystery" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    }) as typeof fetch
+
+    const models = await fetchLmStudioWarmModels("http://127.0.0.1:1234/v1", undefined, fetchImpl)
+    const byId = new Map(models.map((m) => [m.id, m]))
+
+    expect(byId.get("seer")?.input).toEqual(["text", "image"])
+    expect(byId.get("tiny")?.input).toEqual(["text"])
+    expect(byId.get("tiny")?.contextWindow).toBe(8192)
+    expect(byId.get("tiny")?.maxTokens).toBeLessThanOrEqual(8192)
+    // embeddings models are not chat models
+    expect(byId.has("embed")).toBe(false)
+    // unknown to the native endpoint: conservative constants
+    expect(byId.get("mystery")?.contextWindow).toBe(131_072)
+    expect(byId.get("mystery")?.input).toEqual(["text"])
+  })
+
+  it("keeps working with constants when the native endpoint is unavailable", async () => {
+    const fetchImpl = (async (url: unknown) => {
+      if (String(url).endsWith("/api/v0/models")) return new Response("nope", { status: 404 })
+      return new Response(JSON.stringify({ data: [{ id: "qwen3" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    }) as typeof fetch
+
+    const models = await fetchLmStudioWarmModels("http://127.0.0.1:1234/v1", undefined, fetchImpl)
+    expect(models).toHaveLength(1)
+    expect(models[0]).toMatchObject({ id: "qwen3", contextWindow: 131_072, input: ["text"] })
+  })
+
+  it("rejects ids that could parse as lms flags or contain unsafe characters", async () => {
+    const fetchImpl = (async (url: unknown) => {
+      if (String(url).endsWith("/api/v0/models")) return new Response("nope", { status: 404 })
+      return new Response(JSON.stringify({ data: [{ id: "-rf" }, { id: "ok-model" }, { id: "bad id\n" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    }) as typeof fetch
+
+    const models = await fetchLmStudioWarmModels("http://127.0.0.1:1234/v1", undefined, fetchImpl)
+    expect(models.map((m) => m.id)).toEqual(["ok-model"])
+  })
+})
+
+describe("createGatedStreamFn gating deps", () => {
+  it("warm-target fallback uses the configured baseURL, not a hardcoded literal (F26)", async () => {
+    const seen: string[] = []
+    const fn = createGatedStreamFn({
+      warm: async (_key, baseURL) => {
+        seen.push(baseURL)
+        return { ok: false, confirmed: true, reason: "stop here" }
+      },
+      failMode: "closed",
+      logFile: path.join(UNIT_SANDBOX, "stream.log"),
+      baseURL: "http://127.0.0.1:5678/v1",
+    })
+
+    const model = { id: "k", provider: "lm-studio", api: "lm-studio-warm", baseUrl: undefined } as never
+    const events: unknown[] = []
+    for await (const ev of fn(model, { messages: [] } as never)) events.push(ev)
+
+    expect(seen).toEqual(["http://127.0.0.1:5678/v1"])
+  })
+
+  it("names the model in the status/working area while warming and clears it afterwards (F6)", async () => {
+    const uiCalls: Array<[string, ...unknown[]]> = []
+    const ui = {
+      setStatus: (key: string, text: string | undefined) => uiCalls.push(["setStatus", key, text]),
+      setWorkingMessage: (message?: string) => uiCalls.push(["setWorkingMessage", message]),
+    }
+
+    let release: (() => void) | undefined
+    const warmStarted = new Promise<void>((r) => (release = r as never))
+    const fn = createGatedStreamFn({
+      warm: async () => {
+        await warmStarted
+        return { ok: false, confirmed: true, reason: "stop here" }
+      },
+      failMode: "closed",
+      logFile: path.join(UNIT_SANDBOX, "stream.log"),
+      baseURL: "http://127.0.0.1:1234/v1",
+      getUi: () => ui,
+    })
+
+    const model = { id: "big-model", provider: "lm-studio", api: "lm-studio-warm", baseUrl: undefined } as never
+    const stream = fn(model, { messages: [] } as never)
+
+    // within ~1s of gating, the UI names the model being warmed
+    const deadline = Date.now() + 1_000
+    while (
+      !uiCalls.some(([m, , text]) => m === "setStatus" && String(text).includes("big-model")) &&
+      Date.now() < deadline
+    ) {
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    expect(uiCalls.some(([m, , text]) => m === "setStatus" && String(text).includes("big-model"))).toBe(true)
+    expect(uiCalls.some(([m, text]) => m === "setWorkingMessage" && String(text).includes("big-model"))).toBe(true)
+
+    release?.()
+    const events: unknown[] = []
+    for await (const ev of stream) events.push(ev)
+
+    // cleared: last setStatus for our key is undefined, last working message restored
+    const statuses = uiCalls.filter(([m]) => m === "setStatus")
+    expect(statuses.at(-1)?.[2]).toBeUndefined()
+    const working = uiCalls.filter(([m]) => m === "setWorkingMessage")
+    expect(working.at(-1)?.[1]).toBeUndefined()
+  })
+})
+
+describe("createWarmGate process hygiene", () => {
+  it("repeated createWarmGate calls do not accumulate process exit listeners (F31)", () => {
+    const before = process.listeners("exit").length
+    for (let i = 0; i < 15; i++) {
+      const dir = fs.mkdtempSync(path.join(UNIT_SANDBOX, "gate-"))
+      createWarmGate(
+        resolveOptions(
+          {},
+          {
+            logFile: path.join(dir, "warm.log"),
+            lockDir: path.join(dir, "warm.lock"),
+            lmsPath: path.join(dir, "lms-does-not-exist"),
+          },
+        ),
+      )
+    }
+    const after = process.listeners("exit").length
+    expect(after - before).toBeLessThanOrEqual(1)
+  })
+})
+
+describe("extension factory", () => {
+  const sandboxPaths = () => {
+    const dir = fs.mkdtempSync(path.join(UNIT_SANDBOX, "factory-"))
+    return { logFile: path.join(dir, "warm.log"), lockDir: path.join(dir, "warm.lock") }
+  }
+
+  it("inactive when config missing: does not registerProvider", () => {
+    const calls: unknown[] = []
+    const pi = {
+      registerProvider: (...args: unknown[]) => calls.push(args),
+      on: () => {},
+    } as unknown as ExtensionAPI
+
+    activateExtension(pi, () => ({
+      active: false,
+      reason: "missing",
+      warnings: [],
+      sourcePath: null,
+      logFile: sandboxPaths().logFile,
+    }))
+
+    expect(calls).toEqual([])
+  })
+
+  it("invalid config: does not registerProvider and logs the diagnostic (kill switch cannot fail open)", () => {
+    const calls: unknown[] = []
+    const { logFile } = sandboxPaths()
+    const pi = {
+      registerProvider: (...args: unknown[]) => calls.push(args),
+      on: () => {},
+      logger: { warn: () => {} },
+    } as unknown as ExtensionAPI
+
+    activateExtension(pi, () => ({
+      active: false,
+      reason: "invalid",
+      warnings: ['lm-studio-warm is INACTIVE: enabled is "no" in /x/lm-studio-warm.yml — it must be the literal boolean true or false'],
+      sourcePath: "/x/lm-studio-warm.yml",
+      logFile,
+    }))
+
+    expect(calls).toEqual([])
+    const logged = fs.readFileSync(logFile, "utf8")
+    expect(logged).toContain("INACTIVE")
+    expect(logged).toContain("inactive: invalid")
+  })
+
+  it("disabled config: the notice lands in the configured logFile, not a HOME-derived default", () => {
+    const { logFile } = sandboxPaths()
+    const pi = {
+      registerProvider: () => {},
+      on: () => {},
+    } as unknown as ExtensionAPI
+
+    activateExtension(pi, () => ({
+      active: false,
+      reason: "disabled",
+      warnings: [],
+      sourcePath: "/x/lm-studio-warm.yml",
+      logFile,
+    }))
+
+    expect(fs.readFileSync(logFile, "utf8")).toContain("inactive: disabled")
+  })
+
+  it("active config registers lm-studio with api lm-studio-warm and streamSimple", () => {
+    const regs: Array<{ name: string; config: Record<string, unknown> }> = []
+    const events: string[] = []
+    const { logFile, lockDir } = sandboxPaths()
+
+    const pi = {
+      registerProvider: (name: string, config: Record<string, unknown>) => regs.push({ name, config }),
+      on: (event: string) => events.push(event),
+    } as unknown as ExtensionAPI
+
+    activateExtension(pi, () => ({
+      active: true,
+      sourcePath: "/tmp/lm-studio-warm.yml",
+      warnings: [],
+      opts: resolveOptions({}, { eager: true, baseURL: "http://127.0.0.1:1234/v1", logFile, lockDir }),
+    }))
+
+    expect(regs).toHaveLength(1)
+    expect(regs[0]?.name).toBe("lm-studio")
+    expect(regs[0]?.config.api).toBe("lm-studio-warm")
+    expect(typeof regs[0]?.config.streamSimple).toBe("function")
+    expect(typeof regs[0]?.config.fetchDynamicModels).toBe("function")
+    expect(events).toEqual(expect.arrayContaining(["session_start", "session_shutdown"]))
+  })
+})
+

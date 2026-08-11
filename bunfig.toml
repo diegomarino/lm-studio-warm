@@ -1,0 +1,4 @@
+[test]
+# bun test is the canonical runner (see docs: F19). 30s budget matches the
+# former vitest testTimeout for slow warm-gate integration cases.
+timeout = 30000

@@ -3,7 +3,9 @@ import * as http from "node:http"
 import * as os from "node:os"
 import * as path from "node:path"
 
-import { describe, it, expect, beforeAll, afterEach, afterAll } from "vitest"
+import { describe, it, expect, beforeAll, afterEach, afterAll } from "bun:test"
+import { createAssistantMessageEventStream } from "@oh-my-pi/pi-ai"
+import type { Context, Model } from "@oh-my-pi/pi-ai"
 
 import type { LmsInstance, WarmOptions, WarmResult } from "../src/pure"
 
@@ -12,7 +14,7 @@ process.env.HOME = FAKE_HOME
 
 const { createWarmGate } = await import("../src/warm-gate")
 const { resolveOptions } = await import("../src/pure")
-
+const { createGatedStreamFn } = await import("../src/stream")
 /**
  * Integration suite: real createWarmGate against fake lms + loopback HTTP.
  */
@@ -82,6 +84,24 @@ const writeOut = (s, enc) => {
   process.exit(1)
 })()
 `
+
+function fakeModel(over: Partial<Model> = {}): Model {
+  return {
+    id: "k",
+    name: "k",
+    api: "lm-studio-warm",
+    provider: "lm-studio",
+    baseUrl: "http://127.0.0.1:1234/v1",
+    reasoning: false,
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 8192,
+    maxTokens: 2048,
+    compat: {},
+    ...over,
+  } as Model
+}
+
 
 type LoadBehavior = { delayMs?: number; failuresRemaining?: number; errorText?: string; noEffect?: boolean }
 
@@ -314,6 +334,8 @@ describe("warm gate", () => {
     expect(sb.loads("k")).toBe(1)
   })
 
+
+
   it("live lock holder contention times out as ambiguous", async () => {
     const sb = makeSandbox({ lockWaitTimeoutMs: 800 })
     fs.mkdirSync(sb.opts.lockDir)
@@ -332,3 +354,279 @@ describe("warm gate", () => {
     fs.rmSync(sb.opts.lockDir, { recursive: true, force: true })
   })
 })
+
+describe("warm gate hardening (audit regressions)", () => {
+  const sleepMs = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+  it("F14: a lockDir with a missing parent still warms (parent pre-created at gate construction)", async () => {
+    const sb = makeSandbox()
+    const gate = createWarmGate(
+      resolveOptions({}, { ...sb.opts, lockDir: path.join(sb.dir, "missing-parent", "warm.lock") }),
+    )
+    const r = await gate.warm("k", serverURL)
+    expect(r.ok).toBe(true)
+  })
+
+  it("F13: a dangling symlink at lockDir resolves within lockWaitTimeoutMs instead of busy-spinning", async () => {
+    const sb = makeSandbox({ lockWaitTimeoutMs: 1_500 })
+    fs.symlinkSync(path.join(sb.dir, "nowhere"), sb.opts.lockDir)
+
+    const raced = await Promise.race([sb.warm("k"), sleepMs(8_000).then(() => "hung" as const)])
+    expect(raced).not.toBe("hung")
+    const r = raced as WarmResult
+    expect(r.ok).toBe(false)
+    expect(r.confirmed).toBe(false)
+    expect(r.reason).toMatch(/lock contention/i)
+
+    fs.unlinkSync(sb.opts.lockDir)
+  })
+
+  it("F8: touchLock keeps the lock mtime approximately now during a long load (not year 2262)", async () => {
+    const sb = makeSandbox()
+    sb.setState({ instances: [], load: { k: { delayMs: 3_000 } } })
+
+    const pending = sb.warm("k")
+    // touchLock runs immediately before the (3s) lms load spawn: once the
+    // load call is on record, the lock has been touched and is still held.
+    const deadline = Date.now() + 10_000
+    while (sb.loads("k") < 1 && Date.now() < deadline) await sleepMs(50)
+    expect(sb.loads("k")).toBe(1)
+
+    const mtimeMs = fs.statSync(sb.opts.lockDir).mtimeMs
+    expect(Math.abs(mtimeMs - Date.now())).toBeLessThan(10_000)
+
+    const r = await pending
+    expect(r.ok).toBe(true)
+  })
+
+  it("F12: releasing when this process never acquired leaves a foreign pid-less lock untouched", async () => {
+    const sb = makeSandbox()
+    fs.mkdirSync(sb.opts.lockDir) // foreign lock mid-acquisition: no pid file yet
+    sb.gate.releaseLockIfOurs()
+    expect(fs.existsSync(sb.opts.lockDir)).toBe(true)
+    fs.rmSync(sb.opts.lockDir, { recursive: true, force: true })
+  })
+
+  it("F12: a lock dir holding unexpected entries is never deleted, even when the pid says ours", async () => {
+    const sb = makeSandbox()
+    fs.mkdirSync(sb.opts.lockDir)
+    fs.writeFileSync(path.join(sb.opts.lockDir, "pid"), String(process.pid))
+    fs.writeFileSync(path.join(sb.opts.lockDir, "user-data.txt"), "precious")
+    sb.gate.releaseLockIfOurs()
+    expect(fs.existsSync(path.join(sb.opts.lockDir, "user-data.txt"))).toBe(true)
+    fs.rmSync(sb.opts.lockDir, { recursive: true, force: true })
+  })
+
+  it("F18: a missing lms binary is a confirmed failure naming the attempted path and a remedy", async () => {
+    const sb = makeSandbox()
+    const missingLms = path.join(sb.dir, "no-such-lms")
+    const gate = createWarmGate(resolveOptions({}, { ...sb.opts, lmsPath: missingLms }))
+    const r = await gate.warm("k", serverURL)
+    expect(r.ok).toBe(false)
+    expect(r.confirmed).toBe(true)
+    expect(r.reason).toContain(missingLms)
+    expect(r.reason).toMatch(/lmsPath|install/i)
+  })
+
+  it("F16: the first eviction of a session produces a visible notice through the notify channel", async () => {
+    const sb = makeSandbox()
+    const notices: string[] = []
+    const gate = createWarmGate(
+      resolveOptions(
+        {},
+        {
+          ...sb.opts,
+          evictOnPressure: true,
+          ramBudgetMB: 100,
+          evictHeadroomMB: 0,
+          lockDir: path.join(sb.dir, "notify.lock"),
+        },
+      ),
+      { notify: (msg) => notices.push(msg) },
+    )
+    sb.setState({
+      instances: [
+        { modelKey: "old", identifier: "old", status: "idle", queued: 0, lastUsedTime: 1, sizeBytes: 80 * 1024 * 1024 },
+      ],
+      downloaded: [
+        { modelKey: "old", sizeBytes: 80 * 1024 * 1024 },
+        { modelKey: "k", sizeBytes: 50 * 1024 * 1024 },
+      ],
+    })
+    const r = await gate.warm("k", serverURL)
+    expect(r.ok).toBe(true)
+    expect(notices.filter((n) => n.includes("unloading idle model"))).toHaveLength(1)
+  })
+
+  it("F15: a replayed cooldown verdict is annotated as a cached failure, not a live probe", async () => {
+    const sb = makeSandbox()
+    sb.setState({ instances: [], load: { k: { failuresRemaining: 99, errorText: "boom", noEffect: true } } })
+    const first = await sb.warm("k")
+    expect(first.confirmed).toBe(true)
+
+    const replay = await sb.warm("k")
+    expect(replay.ok).toBe(false)
+    expect(replay.reason).toMatch(/cached failure/i)
+    expect(replay.reason).toContain("boom")
+  })
+})
+
+describe("createGatedStreamFn", () => {
+  it("awaits warm before calling streamCompletions", async () => {
+    const order: string[] = []
+    const warm = async () => {
+      order.push("warm")
+      return { ok: true, confirmed: false, reason: "" }
+    }
+    const streamCompletions = () => {
+      order.push("stream")
+      const s = createAssistantMessageEventStream()
+      queueMicrotask(() => {
+        const msg = {
+          role: "assistant" as const,
+          content: [],
+          api: "openai-completions",
+          provider: "lm-studio",
+          model: "k",
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: "stop" as const,
+          timestamp: Date.now(),
+        }
+        s.push({ type: "done", reason: "stop", message: msg as any })
+      })
+      return s
+    }
+
+    const fn = createGatedStreamFn({ warm, failMode: "hybrid", logFile: "/tmp/x.log", baseURL: "http://127.0.0.1:1234/v1", streamCompletions })
+    const stream = fn(fakeModel(), { messages: [] } as Context)
+    expect(stream).toBeTruthy()
+
+    const events: unknown[] = []
+    for await (const ev of stream) events.push(ev)
+
+    expect(order).toEqual(["warm", "stream"])
+    expect(events.at(-1)).toEqual(expect.objectContaining({ type: "done" }))
+  })
+
+  it("hybrid confirmed failure emits terminal error and never streams", async () => {
+    let streamed = false
+
+    const fn = createGatedStreamFn({
+      warm: async () => ({ ok: false, confirmed: true, reason: "load failed" }),
+      failMode: "hybrid",
+      logFile: "/tmp/x.log",
+      baseURL: "http://127.0.0.1:1234/v1",
+      streamCompletions: () => {
+        streamed = true
+        return createAssistantMessageEventStream()
+      },
+    })
+
+    const stream = fn(fakeModel(), { messages: [] } as Context)
+    const events: unknown[] = []
+    for await (const ev of stream) events.push(ev)
+
+    expect(streamed).toBe(false)
+    expect(events).toHaveLength(1)
+    expect((events[0] as { type: string; error?: { errorMessage?: string } }).type).toBe("error")
+    expect(events[0]).toEqual(
+      expect.objectContaining({
+        error: expect.objectContaining({
+          errorMessage: expect.stringContaining('lm-studio-warm: cannot ensure model "k"'),
+        }),
+      }),
+    )
+  })
+
+  it("hybrid ambiguous failure fail-opens into streamCompletions", async () => {
+    let streamed = false
+
+    const fn = createGatedStreamFn({
+      warm: async () => ({ ok: false, confirmed: false, reason: "lock contention timeout" }),
+      failMode: "hybrid",
+      logFile: "/tmp/x.log",
+      baseURL: "http://127.0.0.1:1234/v1",
+      streamCompletions: () => {
+        streamed = true
+        const s = createAssistantMessageEventStream()
+        queueMicrotask(() => {
+          s.push({
+            type: "done",
+            reason: "stop",
+            message: {
+              role: "assistant",
+              content: [],
+              api: "openai-completions",
+              provider: "lm-studio",
+              model: "k",
+              usage: {
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 0,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+              },
+              stopReason: "stop",
+              timestamp: Date.now(),
+            } as any,
+          })
+        })
+        return s
+      },
+    })
+
+    const events: unknown[] = []
+    for await (const ev of fn(fakeModel(), { messages: [] } as Context)) events.push(ev)
+
+    expect(streamed).toBe(true)
+    expect(events.at(-1)).toEqual(expect.objectContaining({ type: "done" }))
+  })
+
+  it("returns the outer stream synchronously (not a Promise)", () => {
+    const fn = createGatedStreamFn({
+      warm: async () => ({ ok: true, confirmed: false, reason: "" }),
+      failMode: "open",
+      logFile: "/tmp/x.log",
+      baseURL: "http://127.0.0.1:1234/v1",
+      streamCompletions: () => {
+        const s = createAssistantMessageEventStream()
+        queueMicrotask(() =>
+          s.push({
+            type: "done",
+            reason: "stop",
+            message: {
+              role: "assistant",
+              content: [],
+              api: "openai-completions",
+              provider: "lm-studio",
+              model: "k",
+              usage: {
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 0,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+              },
+              stopReason: "stop",
+              timestamp: Date.now(),
+            } as any,
+          }),
+        )
+        return s
+      },
+    })
+
+    const ret = fn(fakeModel(), { messages: [] } as Context)
+    expect(typeof (ret as { then?: unknown }).then).toBe("undefined")
+  })
+})
+

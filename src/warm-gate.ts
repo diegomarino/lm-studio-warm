@@ -32,6 +32,26 @@ export type WarmGateDeps = {
    * Signature matches `open -ga "LM Studio"` usage.
    */
   openApp?: (args: string[], timeoutMs: number) => Promise<RunResult>
+  /** User-visible notice channel (e.g. ctx.ui.notify); log-only when absent. */
+  notify?: (message: string, type?: "info" | "warning" | "error") => void
+}
+
+// One process-wide exit hook over a registry of live gates: repeated
+// createWarmGate calls (re-activations, test sandboxes) must not accumulate
+// process "exit" listeners.
+const exitCleanups = new Set<() => void>()
+let exitHookInstalled = false
+function registerExitCleanup(cleanup: () => void): void {
+  exitCleanups.add(cleanup)
+  if (exitHookInstalled) return
+  exitHookInstalled = true
+  process.once("exit", () => {
+    for (const fn of exitCleanups) {
+      try {
+        fn()
+      } catch {}
+    }
+  })
 }
 
 export type WarmGate = {
@@ -67,6 +87,12 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
     fs.mkdirSync(path.dirname(opts.logFile), { recursive: true })
   } catch {}
 
+  // A custom lockDir with a missing parent must not turn every warm into an
+  // ambiguous internal error: pre-create the parent like the log dir.
+  try {
+    fs.mkdirSync(path.dirname(opts.lockDir), { recursive: true })
+  } catch {}
+
   try {
     if (fs.statSync(opts.logFile).size > 5 * 1024 * 1024) fs.renameSync(opts.logFile, `${opts.logFile}.old`)
   } catch {}
@@ -84,21 +110,50 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
     log(msg)
   }
 
+  // Side effects a user would otherwise only discover by accident (the GUI
+  // opening, models vanishing) get one visible notice per session.
+  const notifiedOnce = new Set<string>()
+  function notifyOnce(kind: string, msg: string, type: "info" | "warning" | "error" = "info") {
+    if (!deps.notify || notifiedOnce.has(kind)) return
+    notifiedOnce.add(kind)
+    try {
+      deps.notify(`lm-studio-warm: ${msg}`, type)
+    } catch {}
+  }
+
+  /** True when the lock dir contains anything other than our pid file. */
+  function lockDirHasForeignEntries(): boolean {
+    try {
+      return fs.readdirSync(opts.lockDir).some((entry) => entry !== "pid")
+    } catch {
+      return false
+    }
+  }
+
   function releaseLockIfOurs() {
     try {
-      let ours = true
+      // Ownership is verified before deleting: a missing or blank pid file is
+      // "ours" only when this process believes it holds the lock (its own pid
+      // write may have failed). A foreign or unreadable lock is left for the
+      // acquireLock breakers, which apply age grace before breaking.
+      let ours = holdingLock
       try {
         const pidStr = fs.readFileSync(path.join(opts.lockDir, "pid"), "utf8").trim()
-        ours = pidStr === "" || pidStr === String(process.pid)
-      } catch {
-        ours = true
+        if (pidStr !== "") ours = pidStr === String(process.pid)
+      } catch {}
+
+      if (ours) {
+        if (lockDirHasForeignEntries()) {
+          log(`not deleting lock dir ${opts.lockDir}: it contains unexpected entries — check the lockDir setting`)
+        } else {
+          fs.rmSync(opts.lockDir, { recursive: true, force: true })
+        }
       }
-      if (ours) fs.rmSync(opts.lockDir, { recursive: true, force: true })
     } catch {}
     holdingLock = false
   }
 
-  process.once("exit", () => {
+  registerExitCleanup(() => {
     if (holdingLock) releaseLockIfOurs()
   })
 
@@ -168,6 +223,7 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
 
     if (opts.launchAppFallback && platform === "darwin") {
       log(`server still down — trying: open -ga \"LM Studio\"`)
+      notifyOnce("app-launch", "launching the LM Studio app in the background to start its server (disable with launchAppFallback: false)")
       const openApp = deps.openApp ?? ((args, timeoutMs) => run("/usr/bin/open", args, timeoutMs))
       await openApp(["-ga", "LM Studio"], 15_000)
       await sleep(3_000)
@@ -218,12 +274,17 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
           else if (holder === null && age > pidGraceMs) reason = `abandoned (no pid, age ${Math.round(age / 1000)}s)`
 
           if (reason) {
-            log(`breaking lock: ${reason}`)
-            await fsp.rm(opts.lockDir, { recursive: true, force: true })
-            continue
+            if (lockDirHasForeignEntries()) {
+              logOnce(`not breaking lock ${opts.lockDir} (${reason}): it contains unexpected entries — check the lockDir setting`)
+            } else {
+              log(`breaking lock: ${reason}`)
+              await fsp.rm(opts.lockDir, { recursive: true, force: true })
+              continue
+            }
           }
         } catch {
-          continue
+          // stat raced with the lock vanishing (or lockDir is unstatable):
+          // fall through to the deadline check + sleep — never a hot loop.
         }
 
         if (now() > deadline) return null
@@ -232,13 +293,10 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
     }
   }
 
-  async function lmsLs(): Promise<Array<{ modelKey?: string; sizeBytes?: number }> | null> {
-    const res = await lms.lsModels()
-    if (res === null) {
-      log(`lms ls failed: could not parse output`)
-      return null
-    }
-    return res
+  // The lms client already logs each ls failure with its true cause — no
+  // second (mislabeled) log line here.
+  function lmsLs(): Promise<Array<{ modelKey?: string; sizeBytes?: number }> | null> {
+    return lms.lsModels()
   }
 
   async function unloadIfIdle(
@@ -247,7 +305,7 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
     evicted: Set<string>,
     touchLock: () => Promise<void>,
   ): Promise<boolean> {
-    if (evicted.has(identifier)) return false
+    if (evicted.has(identifier) || identifier.startsWith("-")) return false
     if (opts.evictMaxVictims > 0 && evicted.size >= opts.evictMaxVictims) {
       logOnce(
         `eviction: reached evictMaxVictims=${opts.evictMaxVictims} this attempt — not unloading further (raise evictMaxVictims, or 0 to disable the cap)`,
@@ -266,6 +324,7 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
 
     await touchLock()
     log(`eviction: unloading idle instance ${identifier} to make room for ${key}`)
+    notifyOnce("eviction", `unloading idle model(s) (first: ${identifier}) to make room for ${key} — evictOnPressure is on; details in ${opts.logFile}`, "warning")
 
     const un = await lms.lms(["unload", identifier], 60_000)
     evicted.add(identifier)
@@ -327,16 +386,31 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
     return null
   }
 
+  /** Ambiguous by default; a missing lms binary is a confirmed, named failure. */
+  function psUnknownResult(): WarmResult {
+    const execError = lms.lastRunError()
+    if (execError?.code === "ENOENT") {
+      return { ok: false, confirmed: true, reason: execError.message }
+    }
+    return { ok: false, confirmed: false, reason: "lms ps failed — model state unknown" }
+  }
+
   async function doWarm(key: string, baseURL: string): Promise<WarmResult> {
     const cacheKey = `${baseURL}::${key}`
     warnIfNonLoopback(baseURL)
+
+    // Server-supplied model ids are used as lms argv positionally: never let
+    // one that could parse as a flag through.
+    if (key.startsWith("-")) {
+      return { ok: false, confirmed: true, reason: `refusing model id "${key}": ids starting with "-" could be parsed as lms flags` }
+    }
 
     if (!(await ensureServer(baseURL))) {
       return { ok: false, confirmed: true, reason: `LM Studio HTTP server is not reachable at ${baseURL}` }
     }
 
     let check = classifyPs(await lms.psInstances(), key)
-    if (check.state === "unknown") return { ok: false, confirmed: false, reason: "lms ps failed — model state unknown" }
+    if (check.state === "unknown") return psUnknownResult()
     if (check.state === "addressable") {
       verifiedAt.set(cacheKey, now())
       return OK
@@ -348,11 +422,14 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
       return { ok: false, confirmed: false, reason: "lock contention timeout" }
     }
 
-    const touchLock = () => fsp.utimes(opts.lockDir, now(), now()).catch(() => {})
+    // utimes takes seconds (or Date); passing epoch-ms would park the mtime
+    // centuries in the future and permanently disable the stale/abandoned
+    // lock breakers.
+    const touchLock = () => fsp.utimes(opts.lockDir, new Date(now()), new Date(now())).catch(() => {})
 
     try {
       check = classifyPs(await lms.psInstances(), key)
-      if (check.state === "unknown") return { ok: false, confirmed: false, reason: "lms ps failed — model state unknown" }
+      if (check.state === "unknown") return psUnknownResult()
       if (check.state === "addressable") {
         verifiedAt.set(cacheKey, now())
         return OK
@@ -364,11 +441,17 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
           log(
             `WARNING: only non-addressable instances of ${key} exist (${ids}); busy=${check.busy} — cannot warm`,
           )
-          return { ok: false, confirmed: true, reason: `only suffixed duplicates of ${key} are resident (${ids})` }
+          return {
+            ok: false,
+            confirmed: true,
+            reason:
+              `only suffixed duplicates of ${key} are resident (${ids}) — wait until they go idle (they are then auto-reconciled), ` +
+              `or unload one: lms unload <id> (or via the LM Studio GUI)`,
+          }
         }
 
         for (const d of check.dups) {
-          if (!d.identifier) continue
+          if (!d.identifier || d.identifier.startsWith("-")) continue
           await touchLock()
           log(`reconciling: unloading duplicate instance ${d.identifier}`)
           const un = await lms.lms(["unload", d.identifier], 60_000)
@@ -435,7 +518,14 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
 
     const failed = failedAt.get(cacheKey)
     if (failed && now() - failed.at < opts.retryCooldownMs) {
-      return Promise.resolve({ ok: false, confirmed: true, reason: `${failed.reason} (cooldown)` })
+      // A replayed verdict must read as history, not as a live probe.
+      const ageS = Math.max(1, Math.round((now() - failed.at) / 1000))
+      const retryInS = Math.max(1, Math.ceil((opts.retryCooldownMs - (now() - failed.at)) / 1000))
+      return Promise.resolve({
+        ok: false,
+        confirmed: true,
+        reason: `${failed.reason} (cached failure from ${ageS}s ago — no new probe; retrying in ~${retryInS}s, or restart the session)`,
+      })
     }
 
     const existing = inflight.get(cacheKey)
