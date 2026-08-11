@@ -117,7 +117,7 @@ YAML
 | `evictProtect` | string[] | `[]` | Model IDs never evicted during pressure handling. |
 | `evictMaxVictims` | number | `8` | Max LRU victims per run (`0` = unlimited). |
 | `logFile` | string | `~/.cache/omp/lm-studio-warm.log` | Log file path. |
-| `lockDir` | string | `~/.cache/omp/lm-studio-warm.lock` | Cross-process lock directory. |
+| `lockDir` | string | `~/.cache/lm-studio-warm/lock` | Cross-process lock directory. |
 
 ## Fail mode behavior
 
@@ -166,7 +166,19 @@ stream request ──> createGatedStreamFn
 ## Logs / lock paths
 
 - Log: `~/.cache/omp/lm-studio-warm.log`
-- Lock: `~/.cache/omp/lm-studio-warm.lock`
+- Lock: `~/.cache/lm-studio-warm/lock` — **shared across runtimes.** omp, `pi`
+  and `opencode-lm-studio-warm` sessions all default to this one lock
+  directory, because it guards one physical resource: the local LM Studio
+  process. The lock holder records its own `loadTimeoutMs` budget into the
+  lock (as a `deadline` file); a waiter with a shorter timeout will not break
+  a live holder's lock early, but a dead holder is still broken immediately.
+  If you set `lockDir` explicitly, that value is unaffected by this default.
+
+  > **Migrating from an older release:** the default used to be
+  > `~/.cache/omp/lm-studio-warm.lock` (omp-only). No action is needed — the
+  > old path is simply unused going forward — but if you previously pointed
+  > `lockDir` at that path explicitly, you can drop the override to join the
+  > shared lock, or keep it if you want omp isolated from other runtimes.
 
 ## Demo (asciinema)
 
@@ -209,7 +221,7 @@ Every failure message points at the log (default
 | `refused for memory` / `guardrail` in a load failure | LM Studio refused the load under RAM pressure. | Enable `evictOnPressure`, raise `evictHeadroomMB`, or unload models manually. |
 | `eviction: reached evictMaxVictims=…` | The eviction cap stopped further unloads. | Raise `evictMaxVictims` (or `0` for unlimited). |
 | `WARNING: baseURL … is not loopback` | The gate manages only the local LM Studio; remote servers cannot be warmed. | Point `baseURL` at the local server, or accept JIT behavior for remote. |
-| `not deleting lock dir …: unexpected entries` | `lockDir` points at a directory with real content — refusing to delete it. | Point `lockDir` at a dedicated path (default `~/.cache/omp/lm-studio-warm.lock`). |
+| `not deleting lock dir …: unexpected entries` | `lockDir` points at a directory with real content — refusing to delete it. | Point `lockDir` at a dedicated path (default `~/.cache/lm-studio-warm/lock`); it should only ever contain `pid` and `deadline`. |
 
 ## Development
 

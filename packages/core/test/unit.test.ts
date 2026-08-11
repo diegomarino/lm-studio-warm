@@ -12,6 +12,7 @@ import {
   loadArgs,
   pidAlive,
   parseLockPid,
+  parseLockDeadline,
   shouldFailRequest,
   resolveBudgetBytes,
   parseModelSize,
@@ -340,6 +341,19 @@ describe("pidAlive / parseLockPid", () => {
     expect(parseLockPid("0")).toBeNull()
     expect(parseLockPid("-3")).toBeNull()
     expect(parseLockPid("nope")).toBeNull()
+  })
+})
+
+describe("parseLockDeadline", () => {
+  it("parses a valid decimal epoch-ms string; rejects garbage/blank/non-finite/<=0", () => {
+    expect(parseLockDeadline(" 1699999999999 \n")).toBe(1699999999999)
+    expect(parseLockDeadline("")).toBeNull()
+    expect(parseLockDeadline(null)).toBeNull()
+    expect(parseLockDeadline("0")).toBeNull()
+    expect(parseLockDeadline("-3")).toBeNull()
+    expect(parseLockDeadline("nope")).toBeNull()
+    expect(parseLockDeadline("NaN")).toBeNull()
+    expect(parseLockDeadline("Infinity")).toBeNull()
   })
 })
 

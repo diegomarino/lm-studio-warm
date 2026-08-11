@@ -347,6 +347,13 @@ export function parseLockPid(content: string | null): number | null {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
+/** Parse the holder-recorded deadline (decimal epoch-ms) from lock-file text. */
+export function parseLockDeadline(content: string | null): number | null {
+  if (content == null) return null
+  const n = Number.parseInt(content.trim(), 10)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
 /** Given outcome and failMode, should request fail? */
 export function shouldFailRequest(failMode: WarmOptions["failMode"], result: WarmResult): boolean {
   if (result.ok) return false

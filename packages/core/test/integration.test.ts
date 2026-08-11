@@ -342,6 +342,79 @@ describe("warm gate", () => {
     // cleanup foreign lock so sandbox cleanup is safe
     fs.rmSync(sb.opts.lockDir, { recursive: true, force: true })
   })
+
+  it("holder-recorded deadline: a waiter's own short loadTimeoutMs does not break a lock whose recorded deadline is far in the future", async () => {
+    // A short-timeout waiter must not use ITS OWN budget to judge staleness
+    // once the holder has recorded its own (possibly much longer) deadline.
+    const sb = makeSandbox({ loadTimeoutMs: 100, lockWaitTimeoutMs: 800 })
+    fs.mkdirSync(sb.opts.lockDir)
+    fs.writeFileSync(path.join(sb.opts.lockDir, "pid"), String(process.pid)) // live holder (self, so dead-pid never fires)
+    const farFutureDeadline = Date.now() + 10 * 60_000 // holder's own long budget
+    fs.writeFileSync(path.join(sb.opts.lockDir, "deadline"), String(farFutureDeadline))
+    // age the dir well past the waiter's own (short) fallback budget
+    // (loadTimeoutMs 100 + 120_000 = 120_100ms) — only the recorded deadline
+    // should matter here, not this age.
+    const old = new Date(Date.now() - 200_000)
+    fs.utimesSync(sb.opts.lockDir, old, old)
+    const pidBefore = fs.readFileSync(path.join(sb.opts.lockDir, "pid"), "utf8")
+
+    const r = await sb.warm("k")
+    expect(r.ok).toBe(false)
+    expect(r.confirmed).toBe(false)
+    expect(r.reason).toMatch(/lock contention/i)
+    expect(sb.loads("k")).toBe(0)
+    // lock must not have been broken: pid file is untouched
+    expect(fs.readFileSync(path.join(sb.opts.lockDir, "pid"), "utf8")).toBe(pidBefore)
+
+    fs.rmSync(sb.opts.lockDir, { recursive: true, force: true })
+  })
+
+  it("holder-recorded deadline: a waiter breaks the lock once the recorded deadline has passed, even with a fresh mtime", async () => {
+    const sb = makeSandbox()
+    fs.mkdirSync(sb.opts.lockDir)
+    fs.writeFileSync(path.join(sb.opts.lockDir, "pid"), String(process.pid)) // live holder (self)
+    const pastDeadline = Date.now() - 1_000
+    fs.writeFileSync(path.join(sb.opts.lockDir, "deadline"), String(pastDeadline))
+    // mtime is fresh (age ~0) — far under any age-based fallback budget, so a
+    // break here can only be driven by the recorded deadline having passed.
+    const now = new Date()
+    fs.utimesSync(sb.opts.lockDir, now, now)
+
+    const r = await sb.warm("k")
+    expect(r.ok).toBe(true)
+    expect(sb.loads("k")).toBe(1)
+  })
+
+  it("dead lock holder is broken immediately even when its recorded deadline is far in the future", async () => {
+    const sb = makeSandbox()
+    fs.mkdirSync(sb.opts.lockDir)
+    fs.writeFileSync(path.join(sb.opts.lockDir, "pid"), "2147000000") // dead
+    fs.writeFileSync(path.join(sb.opts.lockDir, "deadline"), String(Date.now() + 10 * 60_000))
+    const r = await sb.warm("k")
+    expect(r.ok).toBe(true)
+    expect(sb.loads("k")).toBe(1)
+  })
+
+  it("foreign-entry guard tolerates the deadline file alongside pid", async () => {
+    const sb = makeSandbox()
+    fs.mkdirSync(sb.opts.lockDir)
+    fs.writeFileSync(path.join(sb.opts.lockDir, "pid"), String(process.pid))
+    fs.writeFileSync(path.join(sb.opts.lockDir, "deadline"), String(Date.now() + 60_000))
+    sb.gate.releaseLockIfOurs()
+    // pid + deadline is the expected shape: releasing our own lock removes it
+    expect(fs.existsSync(sb.opts.lockDir)).toBe(false)
+  })
+
+  it("foreign-entry guard still refuses on any third entry alongside pid + deadline", async () => {
+    const sb = makeSandbox()
+    fs.mkdirSync(sb.opts.lockDir)
+    fs.writeFileSync(path.join(sb.opts.lockDir, "pid"), String(process.pid))
+    fs.writeFileSync(path.join(sb.opts.lockDir, "deadline"), String(Date.now() + 60_000))
+    fs.writeFileSync(path.join(sb.opts.lockDir, "user-data.txt"), "precious")
+    sb.gate.releaseLockIfOurs()
+    expect(fs.existsSync(path.join(sb.opts.lockDir, "user-data.txt"))).toBe(true)
+    fs.rmSync(sb.opts.lockDir, { recursive: true, force: true })
+  })
 })
 
 describe("warm gate hardening (audit regressions)", () => {
