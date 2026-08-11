@@ -1,0 +1,20 @@
+{
+  "name": "lm-studio-warm-core",
+  "version": "0.1.0",
+  "description": "Runtime-agnostic LM Studio pre-warm gate: cross-process lock, eviction planning, lms CLI client, model discovery, two-tier config.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Diego Marino <diego@petalo.xyz>",
+  "repository": { "type": "git", "url": "git+https://github.com/diegomarino/lm-studio-warm.git", "directory": "packages/core" },
+  "engines": { "bun": ">=1.0.0" },
+  "main": "./src/index.ts",
+  "exports": { ".": { "types": "./src/index.ts", "import": "./src/index.ts" } },
+  "files": ["src", "README.md", "LICENSE"],
+  "keywords": ["lm-studio", "lmstudio", "prewarm", "local-llm"],
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test --timeout 30000",
+    "check": "bun run typecheck && bun run test"
+  },
+  "dependencies": { "yaml": "^2.8.0" }
+}

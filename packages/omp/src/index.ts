@@ -1,21 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent"
 
-import { loadConfig, type ConfigLoadResult } from "./config"
-import { fetchLmStudioWarmModels } from "./discover"
+import { appendLog, createWarmGate, loadConfig, type ConfigLoadResult } from "lm-studio-warm-core"
+import { fetchLmStudioWarmModels } from "./discover-adapter"
 import { createGatedStreamFn } from "./stream"
-import { createWarmGate } from "./warm-gate"
-
-import * as fs from "node:fs"
-import * as path from "node:path"
-
-function appendLog(logFile: string, msg: string) {
-  try {
-    fs.mkdirSync(path.dirname(logFile), { recursive: true })
-    fs.appendFileSync(logFile, `${new Date().toISOString()} [pid ${process.pid}] ${msg}\n`)
-  } catch {
-    // ignore
-  }
-}
 
 /** One user-facing line for a batch of config warnings; the first names its file. */
 function summarizeWarnings(warnings: string[], logFile: string): string {

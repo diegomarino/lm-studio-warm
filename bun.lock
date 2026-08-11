@@ -11,11 +11,18 @@
         "typescript": "^5.8.3",
       },
     },
+    "packages/core": {
+      "name": "lm-studio-warm-core",
+      "version": "0.1.0",
+      "dependencies": {
+        "yaml": "^2.8.0",
+      },
+    },
     "packages/omp": {
       "name": "omp-lm-studio-warm",
       "version": "0.1.0",
       "dependencies": {
-        "yaml": "^2.8.0",
+        "lm-studio-warm-core": "^0.1.0",
       },
       "devDependencies": {
         "@oh-my-pi/pi-ai": "17.2.12",
@@ -466,6 +473,8 @@
     "lightningcss-win32-x64-msvc": ["lightningcss-win32-x64-msvc@1.32.0", "", { "os": "win32", "cpu": "x64" }, "sha512-Amq9B/SoZYdDi1kFrojnoqPLxYhQ4Wo5XiL8EVJrVsB8ARoC1PWW6VGtT0WKCemjy8aC+louJnjS7U18x3b06Q=="],
 
     "lines-and-columns": ["lines-and-columns@1.2.4", "", {}, "sha512-7ylylesZQ/PV29jhEDl3Ufjo6ZX7gCqJr5F7PKrqc93v7fzSymt1BpwEU8nAUXs8qzzvqhbjhK5QZg6Mt/HkBg=="],
+
+    "lm-studio-warm-core": ["lm-studio-warm-core@workspace:packages/core"],
 
     "locate-path": ["locate-path@5.0.0", "", { "dependencies": { "p-locate": "^4.1.0" } }, "sha512-t7hw9pI+WvuwNJXwk5zVHpyhIqzg2qTlklJOf0mVxGSbe3Fp2VieZcduNYjaLDoy6p9uGpQEGWG87WpMKlNq8g=="],
 

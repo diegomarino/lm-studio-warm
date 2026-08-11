@@ -48,7 +48,7 @@
     "extensions": ["./src/index.ts"]
   },
   "dependencies": {
-    "yaml": "^2.8.0"
+    "lm-studio-warm-core": "^0.1.0"
   },
   "peerDependencies": {
     "@oh-my-pi/pi-ai": "^17.2.12",
