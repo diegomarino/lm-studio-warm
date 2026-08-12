@@ -17,7 +17,7 @@ for its runtime-specific quick start.</sup>
 | Package | npm name | What it wires into |
 |---|---|---|
 | [`packages/core`](packages/core) | `lm-studio-warm-core` | Runtime-agnostic core: cross-process lock, eviction planning, `lms` CLI client, model discovery, two-tier config loading. Not user-facing on its own. |
-| [`packages/omp`](packages/omp) | `omp-lm-studio-warm` | [`omp`](https://github.com/diegomarino/omp) extension — warms LM Studio models before every `lm-studio` completion stream. |
+| [`packages/omp`](packages/omp) | `omp-lm-studio-warm` | [`omp`](https://github.com/can1357/oh-my-pi) extension — warms LM Studio models before every `lm-studio` completion stream. |
 | [`packages/pi`](packages/pi) | `pi-lm-studio-warm` | [`pi`](https://github.com/earendil-works/pi) extension — same gate, wired as a native `lm-studio` provider. |
 | [`packages/opencode`](packages/opencode) | `opencode-lm-studio-warm` | [opencode](https://opencode.ai) plugin — gates every request via the `chat.params` hook; heals mid-session TTL evictions. |
 | [`packages/opencode-pointer`](packages/opencode-pointer) | `opencode-lmstudio-warm` | Compatibility re-export shell for the pre-rename npm name; excluded from automated releases (manual publishes, see [RELEASING.md](RELEASING.md)). |

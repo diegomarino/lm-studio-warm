@@ -20,7 +20,7 @@ opencode.
 
 ![Quick start: install the plugin, LM Studio starts cold, the first opencode run warms the model before the request leaves, and lms ps shows both models resident with no TTL](https://github.com/user-attachments/assets/f5522cb6-7967-4f47-a8c5-ca617a8d736a)
 
-<sup>Scripted demo (`tools/quickstart/generate-cast.py`) — every output line captured verbatim from a real run; the cold-load wait is shortened, and its spinner visualizes the plugin's background `lms load` (opencode itself waits silently).</sup>
+<sup>Scripted demo — every output line captured verbatim from a real run; the cold-load wait is shortened, and its spinner visualizes the plugin's background `lms load` (opencode itself waits silently).</sup>
 
 Per request, the plugin verifies the model is actually loaded and, only when it
 isn't, performs that single `lms load` before letting the request through.
@@ -78,13 +78,12 @@ first token is requested.
 
 ## Install options
 
-All three paths load the same plugin — pick the one that fits:
+Both paths load the same plugin — pick the one that fits:
 
 | Path | Best for |
 | ------ | ---------- |
 | [npm](#npm-recommended) (recommended) | Most users and fleets — version-pinned, one-line updates |
-| [Single-file copy](#single-file-copy-offline-fleet-wide) | Offline machines |
-| [Project-local](#project-local) | Hacking on the plugin itself |
+| [Plugin-file re-export](#plugin-file-re-export) | Pinning to a specific auto-discovery location, or hacking on the plugin itself |
 
 ### npm (recommended)
 
@@ -114,22 +113,30 @@ jq '
 ' "$CFG" > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
 ```
 
-### Single-file copy (offline, fleet-wide)
+### Plugin-file re-export
 
-```bash
-mkdir -p ~/.config/opencode/plugin
-cp src/index.ts ~/.config/opencode/plugin/lmstudio-warm.ts
+Install the package the normal way — `npm install opencode-lm-studio-warm` /
+`bun add opencode-lm-studio-warm` — then, instead of adding it to the `plugin`
+array, drop a one-line re-export where opencode's plugin auto-discovery looks:
+
+```ts
+// ~/.config/opencode/plugin/lm-studio-warm.ts (global — every session on the
+// machine) or .opencode/plugin/lm-studio-warm.ts (project-local — this
+// project only)
+export * from "opencode-lm-studio-warm"
 ```
 
-Auto-discovered by every opencode session on the machine. (opencode's docs spell
-this directory `plugins`; verified as `plugin/` — singular — on v1.17.10.)
-
-### Project-local
-
-Scope the plugin to a single project by copying `src/index.ts` into that
-project's `.opencode/plugin/lmstudio-warm.ts` — opencode auto-discovers it there
-for that project only. (This repo's own E2E fixture uses exactly this mechanism;
-see `test/e2e/`.)
+Auto-discovered from either location — no `plugin` array entry needed.
+(opencode's docs spell this directory `plugins`; verified as `plugin/` —
+singular — on v1.17.10.) This still needs the package resolvable via Node
+module resolution from wherever the re-export file lives (installed in that
+project's `node_modules`, or globally alongside opencode) — `src/index.ts`
+imports `./config` and the shared `lm-studio-warm-core` package, so a bare
+copy of the file with no install behind it cannot run standalone; there is no
+offline, dependency-free copy path. This repo's own E2E fixture uses the same
+re-export shape (see `test/e2e/`), but re-exports directly from this repo's
+`src/index.ts` by relative path rather than from an installed package, since
+it's exercising this repo's own source.
 
 Whichever path you pick, also apply the LM Studio GUI settings from
 [Quick start](#quick-start) step 3 on every machine. The provider timeouts
@@ -178,7 +185,7 @@ model to give its memory back. There are two independent knobs for that, and the
 
 **Time-based** — set a global TTL and override per model (e.g. keep the small
 model resident, let the big one expire). See
-[`examples/lmstudio-warm.ttl.json`](./examples/lmstudio-warm.ttl.json):
+[`examples/lm-studio-warm.ttl.json`](./examples/lm-studio-warm.ttl.json):
 
 ```json
 {
@@ -274,12 +281,13 @@ reconciled back to an addressable instance. See
 ## Uninstall / rollback
 
 For the npm install path, remove `"opencode-lm-studio-warm"` from the `plugin`
-array in `opencode.json`. For the file-copy paths:
+array in `opencode.json`. For the plugin-file re-export path:
 
 ```bash
-rm ~/.config/opencode/plugin/lmstudio-warm.ts   # removes the gate everywhere
-rm -f ~/.config/opencode/lm-studio-warm.json    # optional tuning file (or legacy lmstudio-warm.json)
-rm -rf ~/.cache/lm-studio-warm/lock             # only if a stale lock lingers (shared lock dir)
+rm ~/.config/opencode/plugin/lm-studio-warm.ts   # or .opencode/plugin/lm-studio-warm.ts — removes the gate
+npm uninstall opencode-lm-studio-warm            # or bun remove, wherever it was installed
+rm -f ~/.config/opencode/lm-studio-warm.json     # optional tuning file (or legacy lmstudio-warm.json)
+rm -rf ~/.cache/lm-studio-warm/lock              # only if a stale lock lingers (shared lock dir)
 ```
 
 Models loaded by the plugin have no TTL, so after uninstalling they stay
