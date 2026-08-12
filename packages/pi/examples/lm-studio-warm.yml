@@ -1,0 +1,16 @@
+# Copy to ~/.pi/agent/lm-studio-warm.yml
+# Presence of this file activates the plugin (delete it or set enabled: false to disable).
+
+eager: true
+# OPT-IN — the shipped default is false. When true, the plugin may UNLOAD other
+# resident models (LRU, idle-only) to make room for the target model. Remove
+# this line to keep the default no-eviction behavior.
+evictOnPressure: true
+failMode: hybrid
+evictProtect:
+  - my-small-model
+perModel:
+  my-main-model:
+    ttlSeconds: 600
+  my-small-model:
+    ttlSeconds: 0

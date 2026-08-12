@@ -6,11 +6,12 @@ import * as path from "node:path"
 import {
   OK,
   BYTES_PER_MB,
-  DEFAULTS,
+  DEFAULT_EVICT_HEADROOM_MB,
   classifyPs,
   evictionCandidates,
   isMemoryPressureError,
   loadArgs,
+  parseLockDeadline,
   parseLockPid,
   parseModelSize,
   pidAlive,
@@ -72,6 +73,15 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
   const totalmem = deps.totalmem ?? (() => os.totalmem())
   const platform = deps.platform ?? process.platform
 
+  // Every process computes staleness from ITS OWN loadTimeoutMs, in two
+  // distinct roles: as a lock HOLDER, this is the budget it records into the
+  // `deadline` file (and keeps refreshing via touchLock) so other processes
+  // honor a load-appropriate timeout instead of guessing; as a lock WAITER
+  // (when a lock's `deadline` is missing/garbled — e.g. written by an older
+  // release), this is the age-based fallback budget applied against ITS OWN
+  // configuration, since the holder's real budget cannot be known.
+  const staleBudgetMs = opts.loadTimeoutMs + 120_000
+
   const verifiedAt = new Map<string, number>()
   const failedAt = new Map<string, { at: number; reason: string }>()
   const inflight = new Map<string, Promise<WarmResult>>()
@@ -121,10 +131,10 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
     } catch {}
   }
 
-  /** True when the lock dir contains anything other than our pid file. */
+  /** True when the lock dir contains anything other than our pid/deadline files. */
   function lockDirHasForeignEntries(): boolean {
     try {
-      return fs.readdirSync(opts.lockDir).some((entry) => entry !== "pid")
+      return fs.readdirSync(opts.lockDir).some((entry) => entry !== "pid" && entry !== "deadline")
     } catch {
       return false
     }
@@ -247,9 +257,17 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
     }
   }
 
+  /** The holder's own recorded staleness budget; null when missing/garbled (older release, or race). */
+  function lockHolderDeadline(): number | null {
+    try {
+      return parseLockDeadline(fs.readFileSync(path.join(opts.lockDir, "deadline"), "utf8"))
+    } catch {
+      return null
+    }
+  }
+
   async function acquireLock(): Promise<(() => void) | null> {
-    const deadline = now() + opts.lockWaitTimeoutMs
-    const staleMs = opts.loadTimeoutMs + 120_000
+    const waitDeadline = now() + opts.lockWaitTimeoutMs
     const pidGraceMs = 5_000
 
     for (;;) {
@@ -259,6 +277,9 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
         try {
           await fsp.writeFile(path.join(opts.lockDir, "pid"), String(process.pid))
         } catch {}
+        try {
+          await fsp.writeFile(path.join(opts.lockDir, "deadline"), String(now() + staleBudgetMs))
+        } catch {}
         return releaseLockIfOurs
       } catch (err: any) {
         if (err?.code !== "EEXIST") throw err
@@ -267,11 +288,22 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
           const st = await fsp.stat(opts.lockDir)
           const age = now() - st.mtimeMs
           const holder = lockHolderPid()
+          const holderDeadlineMs = lockHolderDeadline()
           let reason = ""
 
-          if (age > staleMs) reason = `stale (age ${Math.round(age / 1000)}s)`
-          else if (holder !== null && holder !== process.pid && !pidAlive(holder)) reason = `dead holder pid ${holder}`
-          else if (holder === null && age > pidGraceMs) reason = `abandoned (no pid, age ${Math.round(age / 1000)}s)`
+          // Dead-pid breaking stays immediate and independent of the
+          // deadline: a dead holder must never make waiters wait out a long
+          // (possibly hours-long) recorded budget.
+          if (holder !== null && holder !== process.pid && !pidAlive(holder)) {
+            reason = `dead holder pid ${holder}`
+          } else if (holderDeadlineMs !== null ? now() > holderDeadlineMs : age > staleBudgetMs) {
+            reason =
+              holderDeadlineMs !== null
+                ? `stale (holder deadline passed ${Math.round((now() - holderDeadlineMs) / 1000)}s ago)`
+                : `stale (age ${Math.round(age / 1000)}s, no recorded deadline)`
+          } else if (holder === null && age > pidGraceMs) {
+            reason = `abandoned (no pid, age ${Math.round(age / 1000)}s)`
+          }
 
           if (reason) {
             if (lockDirHasForeignEntries()) {
@@ -287,7 +319,7 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
           // fall through to the deadline check + sleep — never a hot loop.
         }
 
-        if (now() > deadline) return null
+        if (now() > waitDeadline) return null
         await sleep(500)
       }
     }
@@ -345,9 +377,9 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
       return
     }
 
-    if (opts.evictHeadroomMB === DEFAULTS.evictHeadroomMB && (opts.contextLength > 8192 || opts.parallel > 1)) {
+    if (opts.evictHeadroomMB === DEFAULT_EVICT_HEADROOM_MB && (opts.contextLength > 8192 || opts.parallel > 1)) {
       logOnce(
-        `eviction: evictHeadroomMB is at its default ${DEFAULTS.evictHeadroomMB}MB but contextLength/parallel are large — KV cache may exceed it; raise evictHeadroomMB if loads are still refused`,
+        `eviction: evictHeadroomMB is at its default ${DEFAULT_EVICT_HEADROOM_MB}MB but contextLength/parallel are large — KV cache may exceed it; raise evictHeadroomMB if loads are still refused`,
       )
     }
 
@@ -424,8 +456,16 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
 
     // utimes takes seconds (or Date); passing epoch-ms would park the mtime
     // centuries in the future and permanently disable the stale/abandoned
-    // lock breakers.
-    const touchLock = () => fsp.utimes(opts.lockDir, new Date(now()), new Date(now())).catch(() => {})
+    // lock breakers. Alongside the mtime touch, keep pushing the recorded
+    // `deadline` out by this holder's own budget: waiters trust it as long
+    // as we keep proving we're alive, instead of racing our real load time
+    // against the (possibly much shorter) budget the lock happened to be
+    // created with.
+    const touchLock = () =>
+      Promise.all([
+        fsp.utimes(opts.lockDir, new Date(now()), new Date(now())).catch(() => {}),
+        fsp.writeFile(path.join(opts.lockDir, "deadline"), String(now() + staleBudgetMs)).catch(() => {}),
+      ]).then(() => {})
 
     try {
       check = classifyPs(await lms.psInstances(), key)

@@ -1,6 +1,3 @@
-import type { ProviderModelConfig } from "@oh-my-pi/pi-coding-agent"
-
-const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
 const DEFAULT_CONTEXT = 131_072
 const DEFAULT_MAX_TOKENS = 32_768
 
@@ -54,11 +51,13 @@ async function fetchNativeMetadata(
   return map
 }
 
-export async function fetchLmStudioWarmModels(
+export type WarmModelRecord = { id: string; contextWindow: number; maxTokens: number; vision: boolean }
+
+export async function fetchLmStudioModels(
   baseUrl: string,
   apiKey: string | undefined,
   fetchImpl: typeof fetch = fetch,
-): Promise<ProviderModelConfig[]> {
+): Promise<WarmModelRecord[]> {
   const root = baseUrl.replace(/\/+$/, "")
   const headers: Record<string, string> = { Accept: "application/json" }
 
@@ -84,7 +83,7 @@ export async function fetchLmStudioWarmModels(
         ? ((body as { data: unknown[] }).data)
         : []
 
-    const out: ProviderModelConfig[] = []
+    const out: WarmModelRecord[] = []
     for (const entry of data) {
       if (!entry || typeof entry !== "object") continue
       const id = (entry as { id?: unknown }).id
@@ -96,13 +95,9 @@ export async function fetchLmStudioWarmModels(
       const contextWindow = info?.max_context_length ?? DEFAULT_CONTEXT
       out.push({
         id,
-        name: id,
-        api: "lm-studio-warm",
-        reasoning: false,
-        input: info?.type === "vlm" ? ["text", "image"] : ["text"],
-        cost: { ...ZERO_COST },
         contextWindow,
         maxTokens: Math.min(DEFAULT_MAX_TOKENS, contextWindow),
+        vision: info?.type === "vlm",
       })
     }
 

@@ -1,5 +1,6 @@
-import { describe, it, expect } from "bun:test"
+import { describe, it, expect, spyOn } from "bun:test"
 import {
+  buildDefaults,
   resolveOptions,
   sanitizeOptions,
   unknownOptionKeys,
@@ -11,6 +12,7 @@ import {
   loadArgs,
   pidAlive,
   parseLockPid,
+  parseLockDeadline,
   shouldFailRequest,
   resolveBudgetBytes,
   parseModelSize,
@@ -21,82 +23,136 @@ import {
   type WarmOptions,
   type LmsInstance,
 } from "../src/pure"
+import type { RuntimeProfile } from "../src/profile"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
-import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent"
-import { fetchLmStudioWarmModels } from "../src/discover"
-import { activateExtension } from "../src/index"
-import { configCandidatePaths, parseConfigFile, loadConfig } from "../src/config"
-import { createGatedStreamFn } from "../src/stream"
+import { fetchLmStudioModels } from "../src/discover"
+import { configCandidatePaths, parseConfigFile, loadConfigFrom } from "../src/config"
 import { createWarmGate } from "../src/warm-gate"
 import { createLmsClient, type Runner } from "../src/lms"
 
 // Hermetic scratch dir: no test in this file may touch real-$HOME state.
-const UNIT_SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), "omp-lmswarm-unit-"))
+const UNIT_SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), "core-lmswarm-unit-"))
 
 const MiB = 1024 * 1024
 
-function opts(over: Partial<WarmOptions> = {}): WarmOptions {
-  return resolveOptions({}, over)
+const TEST_PROFILE: RuntimeProfile = {
+  runtime: "test",
+  providers: ["lm-studio"],
+  logFile: "~/.cache/test-runtime/lm-studio-warm.log",
+  envBaseUrl: true,
 }
+
+const DEFAULTS = buildDefaults(TEST_PROFILE, "/home/fixture")
+
+function opts(over: Partial<WarmOptions> = {}): WarmOptions {
+  return resolveOptions(DEFAULTS, {}, over)
+}
+
+describe("buildDefaults", () => {
+  it("computes lmsPath, logFile from the passed home — no module-load os.homedir() capture", () => {
+    const home1 = "/home/one"
+    const home2 = "/home/two"
+    const d1 = buildDefaults(TEST_PROFILE, home1)
+    const d2 = buildDefaults(TEST_PROFILE, home2)
+    expect(d1.lmsPath.startsWith(home1) || d1.lmsPath === "lms").toBe(true)
+    expect(d2.lmsPath.startsWith(home2) || d2.lmsPath === "lms").toBe(true)
+    expect(d1.logFile).toBe(path.join(home1, ".cache/test-runtime/lm-studio-warm.log"))
+    expect(d2.logFile).toBe(path.join(home2, ".cache/test-runtime/lm-studio-warm.log"))
+  })
+
+  it("uses the profile's providers and logFile", () => {
+    const d = buildDefaults(
+      { runtime: "pi", providers: ["lm-studio-pi"], logFile: "~/.cache/pi/lm-studio-warm.log", envBaseUrl: false },
+      "/home/u",
+    )
+    expect(d.providers).toEqual(["lm-studio-pi"])
+    expect(d.logFile).toBe("/home/u/.cache/pi/lm-studio-warm.log")
+  })
+
+  it("always uses the shared cross-runtime lockDir regardless of profile", () => {
+    const home = "/home/shared"
+    const dOmp = buildDefaults(TEST_PROFILE, home)
+    const dPi = buildDefaults(
+      { runtime: "pi", providers: ["lm-studio-pi"], logFile: "~/.cache/pi/lm-studio-warm.log", envBaseUrl: false },
+      home,
+    )
+    expect(dOmp.lockDir).toBe(path.join(home, ".cache/lm-studio-warm/lock"))
+    expect(dPi.lockDir).toBe(path.join(home, ".cache/lm-studio-warm/lock"))
+  })
+
+  it("defaults home to os.homedir() when omitted", () => {
+    const d = buildDefaults(TEST_PROFILE)
+    expect(d.lockDir).toBe(path.join(os.homedir(), ".cache/lm-studio-warm/lock"))
+  })
+})
 
 describe("resolveOptions", () => {
   it("applies defaults when nothing is provided", () => {
-    const o = resolveOptions({}, undefined)
+    const o = resolveOptions(DEFAULTS, {}, undefined)
     expect(o.providers).toEqual(["lm-studio"])
     expect(o.failMode).toBe("hybrid")
     expect(o.ttlSeconds).toBe(0)
     expect(o.eager).toBe(true)
     expect(o.enabled).toBe(true)
+    expect(o.evictMaxVictims).toBe(8)
   })
 
   it("file options override defaults, plugin options override file", () => {
-    const o = resolveOptions({ parallel: 2, ttlSeconds: 10 }, { parallel: 5 })
+    const o = resolveOptions(DEFAULTS, { parallel: 2, ttlSeconds: 10 }, { parallel: 5 })
     expect(o.parallel).toBe(5)
     expect(o.ttlSeconds).toBe(10)
   })
 
   it("plugin failMode overrides file failMode", () => {
-    expect(resolveOptions({ failMode: "closed" }, { failMode: "open" }).failMode).toBe("open")
+    expect(resolveOptions(DEFAULTS, { failMode: "closed" }, { failMode: "open" }).failMode).toBe("open")
   })
 })
 
 describe("unknownOptionKeys", () => {
   it("lists keys the plugin does not know", () => {
-    expect(unknownOptionKeys({ verifycachems: 1, failMode: "open" })).toEqual(["verifycachems"])
+    expect(unknownOptionKeys({ verifycachems: 1, failMode: "open" }, DEFAULTS)).toEqual(["verifycachems"])
   })
 
   it("returns empty for known keys only, or an empty object", () => {
-    expect(unknownOptionKeys({})).toEqual([])
-    expect(unknownOptionKeys({ ttlSeconds: 5, eager: false })).toEqual([])
+    expect(unknownOptionKeys({}, DEFAULTS)).toEqual([])
+    expect(unknownOptionKeys({ ttlSeconds: 5, eager: false }, DEFAULTS)).toEqual([])
   })
 })
 
 describe("sanitizeOptions", () => {
   it("passes a valid config through unchanged with no warnings", () => {
-    const { opts: o, warnings } = sanitizeOptions(resolveOptions({}, { failMode: "closed", parallel: 2 }))
+    const { opts: o, warnings } = sanitizeOptions(resolveOptions(DEFAULTS, {}, { failMode: "closed", parallel: 2 }), DEFAULTS)
     expect(warnings).toEqual([])
     expect(o.failMode).toBe("closed")
     expect(o.parallel).toBe(2)
   })
 
   it("falls back to hybrid on unrecognized failMode", () => {
-    const { opts: o, warnings } = sanitizeOptions(resolveOptions({ failMode: "Hybrid" as never }, null))
+    const { opts: o, warnings } = sanitizeOptions(resolveOptions(DEFAULTS, { failMode: "Hybrid" as never }, null), DEFAULTS)
     expect(o.failMode).toBe("hybrid")
     expect(warnings).toHaveLength(1)
     expect(warnings[0]).toContain("failMode")
   })
 
   it("resets providers to default when not a non-empty string array", () => {
-    const { opts: o, warnings } = sanitizeOptions(resolveOptions({ providers: "lm-studio" as never }, null))
+    const { opts: o, warnings } = sanitizeOptions(resolveOptions(DEFAULTS, { providers: "lm-studio" as never }, null), DEFAULTS)
     expect(o.providers).toEqual(["lm-studio"])
     expect(warnings).toHaveLength(1)
   })
 
+  it("rejects providers containing an empty string (distinct from the wrong-type branch above)", () => {
+    const { opts: o, warnings } = sanitizeOptions(resolveOptions(DEFAULTS, { providers: ["lm-studio", ""] }, null), DEFAULTS)
+    expect(o.providers).toEqual(["lm-studio"])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain("providers")
+  })
+
   it("resets negative or non-numeric numeric options to their defaults", () => {
     const { opts: o, warnings } = sanitizeOptions(
-      resolveOptions({ verifyCacheMs: -5, loadTimeoutMs: "big" as never }, null),
+      resolveOptions(DEFAULTS, { verifyCacheMs: -5, loadTimeoutMs: "big" as never }, null),
+      DEFAULTS,
     )
     expect(o.verifyCacheMs).toBe(30_000)
     expect(o.loadTimeoutMs).toBe(900_000)
@@ -104,14 +160,14 @@ describe("sanitizeOptions", () => {
   })
 
   it("resets wrong-typed booleans and empty strings to their defaults", () => {
-    const { opts: o, warnings } = sanitizeOptions(resolveOptions({ eager: "yes" as never, lmsPath: "" }, null))
+    const { opts: o, warnings } = sanitizeOptions(resolveOptions(DEFAULTS, { eager: "yes" as never, lmsPath: "" }, null), DEFAULTS)
     expect(o.eager).toBe(true)
     expect(o.lmsPath).not.toBe("")
     expect(warnings).toHaveLength(2)
   })
 
   it("resets a non-string-array evictProtect to the default empty list", () => {
-    const { opts: o, warnings } = sanitizeOptions(resolveOptions({ evictProtect: [1, "ok"] as never }, null))
+    const { opts: o, warnings } = sanitizeOptions(resolveOptions(DEFAULTS, { evictProtect: [1, "ok"] as never }, null), DEFAULTS)
     expect(o.evictProtect).toEqual([])
     expect(warnings).toHaveLength(1)
   })
@@ -119,6 +175,7 @@ describe("sanitizeOptions", () => {
   it("drops a non-object perModel entry and keeps valid sibling entries", () => {
     const { opts: o, warnings } = sanitizeOptions(
       resolveOptions(
+        DEFAULTS,
         {
           perModel: {
             good: { ttlSeconds: 10 },
@@ -127,6 +184,7 @@ describe("sanitizeOptions", () => {
         },
         null,
       ),
+      DEFAULTS,
     )
     expect(o.perModel.good).toEqual({ ttlSeconds: 10 })
     expect(o.perModel.bad).toBeUndefined()
@@ -136,6 +194,7 @@ describe("sanitizeOptions", () => {
   it("drops invalid/unknown perModel fields but keeps valid ones", () => {
     const { opts: o, warnings } = sanitizeOptions(
       resolveOptions(
+        DEFAULTS,
         {
           perModel: {
             m: { ttlSeconds: 5, parallel: -1 as never, nope: 1 as never } as never,
@@ -143,13 +202,31 @@ describe("sanitizeOptions", () => {
         },
         null,
       ),
+      DEFAULTS,
     )
     expect(o.perModel.m).toEqual({ ttlSeconds: 5 })
     expect(warnings.length).toBeGreaterThanOrEqual(2)
   })
 
+  it("drops a wrong-typed (non-number) perModel field, distinct from the negative-number arm above", () => {
+    const { opts: o, warnings } = sanitizeOptions(
+      resolveOptions(
+        DEFAULTS,
+        {
+          perModel: {
+            m: { contextLength: "8192" as never, parallel: 2 } as never,
+          },
+        },
+        null,
+      ),
+      DEFAULTS,
+    )
+    expect(o.perModel.m).toEqual({ parallel: 2 })
+    expect(warnings.some((w) => w.includes('perModel["m"].contextLength must be a non-negative number'))).toBe(true)
+  })
+
   it("resets evictMaxVictims when negative", () => {
-    const { opts: o, warnings } = sanitizeOptions(resolveOptions({ evictMaxVictims: -1 }, null))
+    const { opts: o, warnings } = sanitizeOptions(resolveOptions(DEFAULTS, { evictMaxVictims: -1 }, null), DEFAULTS)
     expect(o.evictMaxVictims).toBe(8)
     expect(warnings).toHaveLength(1)
   })
@@ -161,6 +238,11 @@ describe("addressable", () => {
     expect(addressable([{ identifier: "k:2", modelKey: "k" }], "k")).toBe(false)
     expect(addressable([], "k")).toBe(false)
     expect(addressable(null as never, "k")).toBe(false)
+  })
+
+  it("tolerates null/garbage elements within an otherwise valid array without throwing", () => {
+    expect(addressable([null as never, { identifier: "k" }], "k")).toBe(true)
+    expect(addressable([null as never, undefined as never], "k")).toBe(false)
   })
 })
 
@@ -190,6 +272,21 @@ describe("parseLmsJsonArray", () => {
     expect(parseLmsJsonArray("not-json")).toBeNull()
     expect(parseLmsJsonArray("")).toBeNull()
     expect(parseLmsJsonArray('{"x":1}', ["instances"])).toBeNull()
+  })
+
+  it("tolerates surrounding whitespace / CRLF around the payload", () => {
+    expect(parseLmsJsonArray('  \r\n[{"a":1}]\n')).toEqual([{ a: 1 }])
+    expect(parseLmsJsonArray("   ")).toBeNull() // whitespace-only collapses to the empty-output branch
+  })
+
+  it("does not auto-unwrap a wrapper object when unwrapKeys is omitted (default [])", () => {
+    expect(parseLmsJsonArray('{"instances":[{"a":1}]}')).toBeNull()
+  })
+
+  it("returns null for successfully-parsed non-array primitives, including the null literal (typeof null === 'object' trap)", () => {
+    expect(parseLmsJsonArray("42")).toBeNull()
+    expect(parseLmsJsonArray('"hi"')).toBeNull()
+    expect(parseLmsJsonArray("null")).toBeNull()
   })
 })
 
@@ -277,6 +374,11 @@ describe("loadArgs", () => {
       ),
     ).toEqual(["load", "k", "-y", "--ttl", "10"])
   })
+
+  it("a perModel override for a different key does not leak into the target key's args", () => {
+    const o = opts({ parallel: 4, perModel: { other: { parallel: 9 } } })
+    expect(loadArgs(o, "k")).toEqual(["load", "k", "-y", "--parallel", "4"])
+  })
 })
 
 describe("pidAlive / parseLockPid", () => {
@@ -289,6 +391,32 @@ describe("pidAlive / parseLockPid", () => {
     expect(parseLockPid("0")).toBeNull()
     expect(parseLockPid("-3")).toBeNull()
     expect(parseLockPid("nope")).toBeNull()
+  })
+
+  it("treats EPERM (process exists but owned by another user) as alive, not dead", () => {
+    const spy = spyOn(process, "kill").mockImplementation(() => {
+      const e = new Error("operation not permitted") as NodeJS.ErrnoException
+      e.code = "EPERM"
+      throw e
+    })
+    try {
+      expect(pidAlive(1)).toBe(true)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})
+
+describe("parseLockDeadline", () => {
+  it("parses a valid decimal epoch-ms string; rejects garbage/blank/non-finite/<=0", () => {
+    expect(parseLockDeadline(" 1699999999999 \n")).toBe(1699999999999)
+    expect(parseLockDeadline("")).toBeNull()
+    expect(parseLockDeadline(null)).toBeNull()
+    expect(parseLockDeadline("0")).toBeNull()
+    expect(parseLockDeadline("-3")).toBeNull()
+    expect(parseLockDeadline("nope")).toBeNull()
+    expect(parseLockDeadline("NaN")).toBeNull()
+    expect(parseLockDeadline("Infinity")).toBeNull()
   })
 })
 
@@ -326,6 +454,27 @@ describe("eviction pure", () => {
     ]
     const got = evictionCandidates(instances, "t", ["p"]).map((i) => i.identifier)
     expect(got).toEqual(["b", "a"])
+  })
+
+  it("evictionCandidates: excludes via modelKey-only target match, queued>0 busy, and missing identifier; missing lastUsedTime sorts first", () => {
+    // A suffixed duplicate of the target (different identifier, same modelKey) must still be excluded —
+    // proves the `i.modelKey !== targetKey` arm, not just the `i.identifier !== targetKey` arm.
+    const dup = { identifier: "t:2", modelKey: "t", status: "idle", queued: 0, lastUsedTime: 1, sizeBytes: 1 }
+    expect(evictionCandidates([dup], "t", [])).toEqual([])
+
+    // queued > 0 counts as busy even when status is idle (not just `generating`).
+    const queued: LmsInstance = { identifier: "q", modelKey: "q", status: "idle", queued: 2, lastUsedTime: 1, sizeBytes: 1 }
+    expect(evictionCandidates([queued], "t", [])).toEqual([])
+
+    // An instance without a string identifier is never a candidate.
+    const noId = { modelKey: "x", status: "idle", queued: 0, lastUsedTime: 1, sizeBytes: 1 } as LmsInstance
+    const ok: LmsInstance = { identifier: "ok", modelKey: "ok", status: "idle", queued: 0, lastUsedTime: 1, sizeBytes: 1 }
+    expect(evictionCandidates([noId, ok], "t", []).map((i) => i.identifier)).toEqual(["ok"])
+
+    // A missing lastUsedTime defaults to 0 and therefore sorts first (most evictable).
+    const never: LmsInstance = { identifier: "never", modelKey: "never", status: "idle", queued: 0, sizeBytes: 1 }
+    const oldest: LmsInstance = { identifier: "oldest", modelKey: "oldest", status: "idle", queued: 0, lastUsedTime: 1000, sizeBytes: 1 }
+    expect(evictionCandidates([oldest, never], "t", []).map((i) => i.identifier)).toEqual(["never", "oldest"])
   })
 
   it("planEviction already-fits / partial / cannot-fit", () => {
@@ -367,29 +516,77 @@ describe("eviction pure", () => {
     expect(nofit.victims.length).toBe(2)
   })
 
+  it("planEviction stops evicting as soon as the target fits (does not over-evict)", () => {
+    const big = { identifier: "big", modelKey: "big", status: "idle", queued: 0, lastUsedTime: 1, sizeBytes: 65 }
+    const small = { identifier: "small", modelKey: "small", status: "idle", queued: 0, lastUsedTime: 5, sizeBytes: 16 }
+    const plan = planEviction({
+      instances: [big, small],
+      targetKey: "t",
+      targetSizeBytes: 27,
+      budgetBytes: 100,
+      headroomBytes: 4,
+      protect: [],
+    })
+    // used=81, available=19, needed=31 → evicting `big` alone (LRU first) already covers it; `small` is untouched.
+    expect(plan.victims.map((v) => v.identifier)).toEqual(["big"])
+    expect(plan.fitsAfter).toBe(true)
+  })
+
+  it("planEviction: no eligible candidates (all busy) → empty victims, fitsAfter false", () => {
+    const busy = { identifier: "busy", modelKey: "busy", status: "generating", queued: 0, lastUsedTime: 1, sizeBytes: 65 }
+    const plan = planEviction({
+      instances: [busy],
+      targetKey: "t",
+      targetSizeBytes: 27,
+      budgetBytes: 80,
+      headroomBytes: 4,
+      protect: [],
+    })
+    expect(plan.victims).toEqual([])
+    expect(plan.fitsAfter).toBe(false)
+  })
+
   it("isMemoryPressureError matches guardrail/OOM only", () => {
     expect(isMemoryPressureError("insufficient system resources / memory guardrail")).toBe(true)
     expect(isMemoryPressureError("CUDA OOM")).toBe(true)
     expect(isMemoryPressureError("not enough VRAM")).toBe(true)
+    expect(isMemoryPressureError("Error: out of memory")).toBe(true) // literal "out of memory" branch, distinct from the \boom\b regex above
     expect(isMemoryPressureError("context length exceeds max")).toBe(false)
     expect(isMemoryPressureError("insufficient disk space")).toBe(false)
     expect(isMemoryPressureError("model not found")).toBe(false)
   })
 })
 describe("configCandidatePaths", () => {
-  it("defaults to ~/.omp/agent lm-studio-warm.{yml,yaml,json}", () => {
+  it("probes each candidate dir for lm-studio-warm.{yml,yaml,json} in order", () => {
     const home = "/tmp/fake-home"
-    expect(configCandidatePaths(home, {})).toEqual([
-      path.join(home, ".omp/agent/lm-studio-warm.yml"),
-      path.join(home, ".omp/agent/lm-studio-warm.yaml"),
-      path.join(home, ".omp/agent/lm-studio-warm.json"),
+    expect(configCandidatePaths(["/custom/agent"], TEST_PROFILE, home)).toEqual([
+      "/custom/agent/lm-studio-warm.yml",
+      "/custom/agent/lm-studio-warm.yaml",
+      "/custom/agent/lm-studio-warm.json",
     ])
   })
 
-  it("honors PI_CODING_AGENT_DIR over default agent dir", () => {
+  it("expands a leading ~ in a candidate dir against home", () => {
     const home = "/tmp/fake-home"
-    const paths = configCandidatePaths(home, { PI_CODING_AGENT_DIR: "/custom/agent" })
-    expect(paths[0]).toBe("/custom/agent/lm-studio-warm.yml")
+    const paths = configCandidatePaths(["~/.agent"], TEST_PROFILE, home)
+    expect(paths[0]).toBe(path.join(home, ".agent/lm-studio-warm.yml"))
+  })
+
+  it("walks multiple candidate dirs, each dir's full filename set before the next dir", () => {
+    const paths = configCandidatePaths(["/a", "/b"], TEST_PROFILE, "/home/u")
+    expect(paths).toEqual([
+      "/a/lm-studio-warm.yml",
+      "/a/lm-studio-warm.yaml",
+      "/a/lm-studio-warm.json",
+      "/b/lm-studio-warm.yml",
+      "/b/lm-studio-warm.yaml",
+      "/b/lm-studio-warm.json",
+    ])
+  })
+
+  it("honors a profile-supplied configNames override", () => {
+    const profile: RuntimeProfile = { ...TEST_PROFILE, configNames: ["custom.yml"] }
+    expect(configCandidatePaths(["/a"], profile, "/home/u")).toEqual(["/a/custom.yml"])
   })
 })
 
@@ -413,18 +610,27 @@ describe("parseConfigFile", () => {
     expect(warning).toMatch(/parse/i)
   })
 
-  it("warns when top-level is not an object", () => {
-    const { opts, warning } = parseConfigFile("[]", "x.json")
-    expect(opts).toEqual({})
-    expect(warning).toMatch(/object/i)
+  it("warns when top-level is not an object (array, string, null, or number)", () => {
+    // `null` specifically exercises the explicit `parsed === null` guard, since
+    // `typeof null === "object"` would otherwise slip past a naive object check.
+    for (const bad of ["[]", '"str"', "null", "42"]) {
+      const { opts, warning } = parseConfigFile(bad, "x.json")
+      expect(opts).toEqual({})
+      expect(warning).toMatch(/object/i)
+    }
   })
 })
 
-describe("loadConfig", () => {
+const AGENT_DIR = "/agent"
+
+function loadFrom(over: Partial<Parameters<typeof loadConfigFrom>[0]> = {}) {
+  return loadConfigFrom({ candidateDirs: [AGENT_DIR], profile: TEST_PROFILE, env: {}, ...over })
+}
+
+describe("loadConfigFrom", () => {
   it("missing file → inactive", () => {
-    const r = loadConfig({
+    const r = loadFrom({
       home: "/no/such/home",
-      env: {},
       readFile: () => {
         throw Object.assign(new Error("enoent"), { code: "ENOENT" })
       },
@@ -434,9 +640,8 @@ describe("loadConfig", () => {
   })
 
   it("enabled:false → inactive disabled", () => {
-    const r = loadConfig({
+    const r = loadFrom({
       home: "/h",
-      env: {},
       readFile: (p) => {
         if (p.endsWith(".yml")) return "enabled: false\n"
         throw Object.assign(new Error("enoent"), { code: "ENOENT" })
@@ -446,10 +651,9 @@ describe("loadConfig", () => {
     if (!r.active) expect(r.reason).toBe("disabled")
   })
 
-  it("present file → active with sanitized defaults merged", () => {
-    const r = loadConfig({
+  it("present file → active with sanitized defaults merged, using the injected profile's providers", () => {
+    const r = loadFrom({
       home: "/h",
-      env: {},
       readFile: (p) => {
         if (p.endsWith(".yml")) return "failMode: closed\nunknownKey: 1\n"
         throw Object.assign(new Error("enoent"), { code: "ENOENT" })
@@ -462,9 +666,67 @@ describe("loadConfig", () => {
       expect(r.warnings.some((w) => w.includes("unknownKey"))).toBe(true)
     }
   })
+
+  it("probes each candidateDir in order, falling through on ENOENT", () => {
+    const r = loadFrom({
+      candidateDirs: ["/first", "/second"],
+      home: "/h",
+      readFile: (p) => {
+        if (p.startsWith("/second") && p.endsWith(".yml")) return "failMode: closed\n"
+        throw Object.assign(new Error("enoent"), { code: "ENOENT" })
+      },
+    })
+    expect(r.active).toBe(true)
+    if (r.active) {
+      expect(r.sourcePath).toBe("/second/lm-studio-warm.yml")
+      expect(r.opts.failMode).toBe("closed")
+    }
+  })
+
+  it("uses a different runtime's providers/logFile when given a different profile", () => {
+    const piProfile: RuntimeProfile = {
+      runtime: "pi",
+      providers: ["lm-studio-pi"],
+      logFile: "~/.cache/pi/lm-studio-warm.log",
+      envBaseUrl: false,
+    }
+    const r = loadConfigFrom({
+      candidateDirs: [AGENT_DIR],
+      profile: piProfile,
+      home: "/h",
+      env: {},
+      readFile: () => {
+        throw Object.assign(new Error("enoent"), { code: "ENOENT" })
+      },
+    })
+    expect(r.active).toBe(false)
+    if (!r.active) expect(r.logFile).toBe("/h/.cache/pi/lm-studio-warm.log")
+  })
+
+  it("honors LM_STUDIO_BASE_URL only when profile.envBaseUrl is true", () => {
+    const withDefaultBaseUrl = (p: string) => {
+      if (p.endsWith(".yml")) return "failMode: closed\n"
+      throw Object.assign(new Error("enoent"), { code: "ENOENT" })
+    }
+
+    const enabled = loadFrom({ home: "/h", env: { LM_STUDIO_BASE_URL: "http://10.0.0.5:1234/v1" }, readFile: withDefaultBaseUrl })
+    expect(enabled.active).toBe(true)
+    if (enabled.active) expect(enabled.opts.baseURL).toBe("http://10.0.0.5:1234/v1")
+
+    const disabledProfile: RuntimeProfile = { ...TEST_PROFILE, envBaseUrl: false }
+    const disabled = loadConfigFrom({
+      candidateDirs: [AGENT_DIR],
+      profile: disabledProfile,
+      home: "/h",
+      env: { LM_STUDIO_BASE_URL: "http://10.0.0.5:1234/v1" },
+      readFile: withDefaultBaseUrl,
+    })
+    expect(disabled.active).toBe(true)
+    if (disabled.active) expect(disabled.opts.baseURL).toBe("http://127.0.0.1:1234/v1")
+  })
 })
 
-describe("loadConfig two-tier safety", () => {
+describe("loadConfigFrom two-tier safety", () => {
   const enoent = () => Object.assign(new Error("enoent"), { code: "ENOENT" })
   const withYml = (content: string) => (p: string) => {
     if (p.endsWith(".yml")) return content
@@ -472,7 +734,7 @@ describe("loadConfig two-tier safety", () => {
   }
 
   it("enabled: no (YAML 1.2 string) deactivates with a named diagnostic instead of repairing to true", () => {
-    const r = loadConfig({ home: "/h", env: {}, readFile: withYml("enabled: no\n") })
+    const r = loadFrom({ home: "/h", readFile: withYml("enabled: no\n") })
     expect(r.active).toBe(false)
     if (!r.active) {
       expect(r.reason).toBe("invalid")
@@ -482,13 +744,13 @@ describe("loadConfig two-tier safety", () => {
   })
 
   it('quoted enabled: "false" deactivates as invalid (not silently active)', () => {
-    const r = loadConfig({ home: "/h", env: {}, readFile: withYml('enabled: "false"\n') })
+    const r = loadFrom({ home: "/h", readFile: withYml('enabled: "false"\n') })
     expect(r.active).toBe(false)
     if (!r.active) expect(r.reason).toBe("invalid")
   })
 
   it("a syntactically broken file containing enabled: false deactivates with the parse error surfaced", () => {
-    const r = loadConfig({ home: "/h", env: {}, readFile: withYml("enabled: false\n  bad: [unclosed\n") })
+    const r = loadFrom({ home: "/h", readFile: withYml("enabled: false\n  bad: [unclosed\n") })
     expect(r.active).toBe(false)
     if (!r.active) {
       expect(r.reason).toBe("invalid")
@@ -497,7 +759,7 @@ describe("loadConfig two-tier safety", () => {
   })
 
   it("tuning-tier mistakes still repair to defaults with warnings (resilience preserved)", () => {
-    const r = loadConfig({ home: "/h", env: {}, readFile: withYml("failMode: Wrong\nttlSeconds: -4\n") })
+    const r = loadFrom({ home: "/h", readFile: withYml("failMode: Wrong\nttlSeconds: -4\n") })
     expect(r.active).toBe(true)
     if (r.active) {
       expect(r.opts.failMode).toBe("hybrid")
@@ -507,9 +769,8 @@ describe("loadConfig two-tier safety", () => {
   })
 
   it("a found-but-unreadable config is reason unreadable, keeps its warning, and names the file", () => {
-    const r = loadConfig({
+    const r = loadFrom({
       home: "/h",
-      env: {},
       readFile: (p) => {
         if (p.endsWith(".yml")) throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
         throw enoent()
@@ -524,9 +785,8 @@ describe("loadConfig two-tier safety", () => {
   })
 
   it("expands ~ in user-supplied lmsPath/logFile/lockDir", () => {
-    const r = loadConfig({
+    const r = loadFrom({
       home: "/home/u",
-      env: {},
       readFile: withYml("lmsPath: ~/.lmstudio/bin/lms\nlogFile: ~/logs/warm.log\nlockDir: ~/locks/warm.lock\n"),
     })
     expect(r.active).toBe(true)
@@ -538,9 +798,8 @@ describe("loadConfig two-tier safety", () => {
   })
 
   it("disabled arm resolves the configured (tilde-expanded) logFile for the inactive notice", () => {
-    const r = loadConfig({
+    const r = loadFrom({
       home: "/home/u",
-      env: {},
       readFile: withYml("enabled: false\nlogFile: ~/custom/warm.log\n"),
     })
     expect(r.active).toBe(false)
@@ -551,33 +810,15 @@ describe("loadConfig two-tier safety", () => {
   })
 })
 
-describe("fetchLmStudioWarmModels", () => {
-  it("maps OpenAI /models data to ProviderModelConfig with api lm-studio-warm", async () => {
-    const fetchImpl = async () =>
-      new Response(JSON.stringify({ data: [{ id: "qwen3" }, { id: "other" }] }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      })
-
-    const models = await fetchLmStudioWarmModels("http://127.0.0.1:1234/v1", undefined, fetchImpl as unknown as typeof fetch)
-    expect(models).toHaveLength(2)
-    expect(models[0]).toMatchObject({
-      id: "qwen3",
-      name: "qwen3",
-      api: "lm-studio-warm",
-      reasoning: false,
-      input: ["text"],
-    })
-  })
-
+describe("fetchLmStudioModels", () => {
   it("returns [] on HTTP failure", async () => {
     const fetchImpl = async () => new Response("nope", { status: 500 })
     await expect(
-      fetchLmStudioWarmModels("http://127.0.0.1:9/v1", undefined, fetchImpl as unknown as typeof fetch),
+      fetchLmStudioModels("http://127.0.0.1:9/v1", undefined, fetchImpl as unknown as typeof fetch),
     ).resolves.toEqual([])
   })
 
-  it("enriches from native /api/v0/models: vision models get image input, small models keep native context", async () => {
+  it("enriches from native /api/v0/models: vision models get vision=true, small models keep native context", async () => {
     const fetchImpl = (async (url: unknown) => {
       const u = String(url)
       if (u.endsWith("/api/v0/models")) {
@@ -598,18 +839,18 @@ describe("fetchLmStudioWarmModels", () => {
       })
     }) as typeof fetch
 
-    const models = await fetchLmStudioWarmModels("http://127.0.0.1:1234/v1", undefined, fetchImpl)
+    const models = await fetchLmStudioModels("http://127.0.0.1:1234/v1", undefined, fetchImpl)
     const byId = new Map(models.map((m) => [m.id, m]))
 
-    expect(byId.get("seer")?.input).toEqual(["text", "image"])
-    expect(byId.get("tiny")?.input).toEqual(["text"])
+    expect(byId.get("seer")?.vision).toBe(true)
+    expect(byId.get("tiny")?.vision).toBe(false)
     expect(byId.get("tiny")?.contextWindow).toBe(8192)
     expect(byId.get("tiny")?.maxTokens).toBeLessThanOrEqual(8192)
     // embeddings models are not chat models
     expect(byId.has("embed")).toBe(false)
     // unknown to the native endpoint: conservative constants
     expect(byId.get("mystery")?.contextWindow).toBe(131_072)
-    expect(byId.get("mystery")?.input).toEqual(["text"])
+    expect(byId.get("mystery")?.vision).toBe(false)
   })
 
   it("keeps working with constants when the native endpoint is unavailable", async () => {
@@ -621,9 +862,9 @@ describe("fetchLmStudioWarmModels", () => {
       })
     }) as typeof fetch
 
-    const models = await fetchLmStudioWarmModels("http://127.0.0.1:1234/v1", undefined, fetchImpl)
+    const models = await fetchLmStudioModels("http://127.0.0.1:1234/v1", undefined, fetchImpl)
     expect(models).toHaveLength(1)
-    expect(models[0]).toMatchObject({ id: "qwen3", contextWindow: 131_072, input: ["text"] })
+    expect(models[0]).toMatchObject({ id: "qwen3", contextWindow: 131_072, vision: false })
   })
 
   it("rejects ids that could parse as lms flags or contain unsafe characters", async () => {
@@ -635,74 +876,8 @@ describe("fetchLmStudioWarmModels", () => {
       })
     }) as typeof fetch
 
-    const models = await fetchLmStudioWarmModels("http://127.0.0.1:1234/v1", undefined, fetchImpl)
+    const models = await fetchLmStudioModels("http://127.0.0.1:1234/v1", undefined, fetchImpl)
     expect(models.map((m) => m.id)).toEqual(["ok-model"])
-  })
-})
-
-describe("createGatedStreamFn gating deps", () => {
-  it("warm-target fallback uses the configured baseURL, not a hardcoded literal (F26)", async () => {
-    const seen: string[] = []
-    const fn = createGatedStreamFn({
-      warm: async (_key, baseURL) => {
-        seen.push(baseURL)
-        return { ok: false, confirmed: true, reason: "stop here" }
-      },
-      failMode: "closed",
-      logFile: path.join(UNIT_SANDBOX, "stream.log"),
-      baseURL: "http://127.0.0.1:5678/v1",
-    })
-
-    const model = { id: "k", provider: "lm-studio", api: "lm-studio-warm", baseUrl: undefined } as never
-    const events: unknown[] = []
-    for await (const ev of fn(model, { messages: [] } as never)) events.push(ev)
-
-    expect(seen).toEqual(["http://127.0.0.1:5678/v1"])
-  })
-
-  it("names the model in the status/working area while warming and clears it afterwards (F6)", async () => {
-    const uiCalls: Array<[string, ...unknown[]]> = []
-    const ui = {
-      setStatus: (key: string, text: string | undefined) => uiCalls.push(["setStatus", key, text]),
-      setWorkingMessage: (message?: string) => uiCalls.push(["setWorkingMessage", message]),
-    }
-
-    let release: (() => void) | undefined
-    const warmStarted = new Promise<void>((r) => (release = r as never))
-    const fn = createGatedStreamFn({
-      warm: async () => {
-        await warmStarted
-        return { ok: false, confirmed: true, reason: "stop here" }
-      },
-      failMode: "closed",
-      logFile: path.join(UNIT_SANDBOX, "stream.log"),
-      baseURL: "http://127.0.0.1:1234/v1",
-      getUi: () => ui,
-    })
-
-    const model = { id: "big-model", provider: "lm-studio", api: "lm-studio-warm", baseUrl: undefined } as never
-    const stream = fn(model, { messages: [] } as never)
-
-    // within ~1s of gating, the UI names the model being warmed
-    const deadline = Date.now() + 1_000
-    while (
-      !uiCalls.some(([m, , text]) => m === "setStatus" && String(text).includes("big-model")) &&
-      Date.now() < deadline
-    ) {
-      await new Promise((r) => setTimeout(r, 10))
-    }
-    expect(uiCalls.some(([m, , text]) => m === "setStatus" && String(text).includes("big-model"))).toBe(true)
-    expect(uiCalls.some(([m, text]) => m === "setWorkingMessage" && String(text).includes("big-model"))).toBe(true)
-
-    release?.()
-    const events: unknown[] = []
-    for await (const ev of stream) events.push(ev)
-
-    // cleared: last setStatus for our key is undefined, last working message restored
-    const statuses = uiCalls.filter(([m]) => m === "setStatus")
-    expect(statuses.at(-1)?.[2]).toBeUndefined()
-    const working = uiCalls.filter(([m]) => m === "setWorkingMessage")
-    expect(working.at(-1)?.[1]).toBeUndefined()
   })
 })
 
@@ -713,6 +888,7 @@ describe("createWarmGate process hygiene", () => {
       const dir = fs.mkdtempSync(path.join(UNIT_SANDBOX, "gate-"))
       createWarmGate(
         resolveOptions(
+          DEFAULTS,
           {},
           {
             logFile: path.join(dir, "warm.log"),
@@ -724,97 +900,6 @@ describe("createWarmGate process hygiene", () => {
     }
     const after = process.listeners("exit").length
     expect(after - before).toBeLessThanOrEqual(1)
-  })
-})
-
-describe("extension factory", () => {
-  const sandboxPaths = () => {
-    const dir = fs.mkdtempSync(path.join(UNIT_SANDBOX, "factory-"))
-    return { logFile: path.join(dir, "warm.log"), lockDir: path.join(dir, "warm.lock") }
-  }
-
-  it("inactive when config missing: does not registerProvider", () => {
-    const calls: unknown[] = []
-    const pi = {
-      registerProvider: (...args: unknown[]) => calls.push(args),
-      on: () => {},
-    } as unknown as ExtensionAPI
-
-    activateExtension(pi, () => ({
-      active: false,
-      reason: "missing",
-      warnings: [],
-      sourcePath: null,
-      logFile: sandboxPaths().logFile,
-    }))
-
-    expect(calls).toEqual([])
-  })
-
-  it("invalid config: does not registerProvider and logs the diagnostic (kill switch cannot fail open)", () => {
-    const calls: unknown[] = []
-    const { logFile } = sandboxPaths()
-    const pi = {
-      registerProvider: (...args: unknown[]) => calls.push(args),
-      on: () => {},
-      logger: { warn: () => {} },
-    } as unknown as ExtensionAPI
-
-    activateExtension(pi, () => ({
-      active: false,
-      reason: "invalid",
-      warnings: ['lm-studio-warm is INACTIVE: enabled is "no" in /x/lm-studio-warm.yml — it must be the literal boolean true or false'],
-      sourcePath: "/x/lm-studio-warm.yml",
-      logFile,
-    }))
-
-    expect(calls).toEqual([])
-    const logged = fs.readFileSync(logFile, "utf8")
-    expect(logged).toContain("INACTIVE")
-    expect(logged).toContain("inactive: invalid")
-  })
-
-  it("disabled config: the notice lands in the configured logFile, not a HOME-derived default", () => {
-    const { logFile } = sandboxPaths()
-    const pi = {
-      registerProvider: () => {},
-      on: () => {},
-    } as unknown as ExtensionAPI
-
-    activateExtension(pi, () => ({
-      active: false,
-      reason: "disabled",
-      warnings: [],
-      sourcePath: "/x/lm-studio-warm.yml",
-      logFile,
-    }))
-
-    expect(fs.readFileSync(logFile, "utf8")).toContain("inactive: disabled")
-  })
-
-  it("active config registers lm-studio with api lm-studio-warm and streamSimple", () => {
-    const regs: Array<{ name: string; config: Record<string, unknown> }> = []
-    const events: string[] = []
-    const { logFile, lockDir } = sandboxPaths()
-
-    const pi = {
-      registerProvider: (name: string, config: Record<string, unknown>) => regs.push({ name, config }),
-      on: (event: string) => events.push(event),
-    } as unknown as ExtensionAPI
-
-    activateExtension(pi, () => ({
-      active: true,
-      sourcePath: "/tmp/lm-studio-warm.yml",
-      warnings: [],
-      opts: resolveOptions({}, { eager: true, baseURL: "http://127.0.0.1:1234/v1", logFile, lockDir }),
-    }))
-
-    expect(regs).toHaveLength(1)
-    expect(regs[0]?.name).toBe("lm-studio")
-    expect(regs[0]?.config.api).toBe("lm-studio-warm")
-    expect(typeof regs[0]?.config.streamSimple).toBe("function")
-    expect(typeof regs[0]?.config.fetchDynamicModels).toBe("function")
-    expect(events).toEqual(expect.arrayContaining(["session_start", "session_shutdown"]))
   })
 })
 

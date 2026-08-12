@@ -1,4 +1,10 @@
 [test]
 # bun test is the canonical runner (see docs: F19). 30s budget matches the
 # former vitest testTimeout for slow warm-gate integration cases.
+#
+# This root-level config only governs `bun test` invoked with the repo root
+# as cwd — it is NOT picked up when a workspace package's own `test` script
+# runs `bun test` from the package directory (e.g. via `bun run --filter`).
+# Every package's `test` script must set its own explicit
+# `bun test --timeout 30000` for this budget to apply.
 timeout = 30000

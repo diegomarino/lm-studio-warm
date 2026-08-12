@@ -3,12 +3,14 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { parse as parseYaml } from "yaml"
 import {
-  DEFAULTS,
+  buildDefaults,
+  expandHome,
   resolveOptions,
   sanitizeOptions,
   unknownOptionKeys,
   type WarmOptions,
 } from "./pure"
+import type { RuntimeProfile } from "./profile"
 
 /**
  * Two-tier config handling:
@@ -40,22 +42,17 @@ export type ConfigLoadResult =
       sourcePath: string
     }
 
-function expandHome(p: string, home: string): string {
-  if (p === "~") return home
-  if (p.startsWith("~/")) return path.join(home, p.slice(2))
-  return p
-}
+const DEFAULT_CONFIG_NAMES = ["lm-studio-warm.yml", "lm-studio-warm.yaml", "lm-studio-warm.json"]
 
-export function configCandidatePaths(home = os.homedir(), env: NodeJS.ProcessEnv = process.env): string[] {
-  const agentDir = env.PI_CODING_AGENT_DIR
-    ? expandHome(env.PI_CODING_AGENT_DIR, home)
-    : path.join(home, ".omp/agent")
-
-  return [
-    path.join(agentDir, "lm-studio-warm.yml"),
-    path.join(agentDir, "lm-studio-warm.yaml"),
-    path.join(agentDir, "lm-studio-warm.json"),
-  ]
+/** Probe list: each candidate dir (tilde-expanded against `home`) × the profile's config filenames, in order. */
+export function configCandidatePaths(candidateDirs: string[], profile: RuntimeProfile, home: string = os.homedir()): string[] {
+  const names = profile.configNames ?? DEFAULT_CONFIG_NAMES
+  const paths: string[] = []
+  for (const dir of candidateDirs) {
+    const expandedDir = expandHome(dir, home)
+    for (const name of names) paths.push(path.join(expandedDir, name))
+  }
+  return paths
 }
 
 export function parseConfigFile(
@@ -80,27 +77,31 @@ export function parseConfigFile(
 }
 
 /** Best-effort logFile for inactive-path diagnostics: configured value when usable, else default. */
-function inactiveLogFile(fileOpts: Partial<WarmOptions>, home: string): string {
+function inactiveLogFile(fileOpts: Partial<WarmOptions>, defaults: WarmOptions, home: string): string {
   const configured = (fileOpts as Record<string, unknown>).logFile
-  const chosen = typeof configured === "string" && configured !== "" ? configured : DEFAULTS.logFile
+  const chosen = typeof configured === "string" && configured !== "" ? configured : defaults.logFile
   return expandHome(chosen, home)
 }
 
-export function loadConfig(options?: {
+export function loadConfigFrom(input: {
+  candidateDirs: string[]
+  profile: RuntimeProfile
   home?: string
   env?: NodeJS.ProcessEnv
   readFile?: (path: string) => string
 }): ConfigLoadResult {
-  const home = options?.home ?? os.homedir()
-  const env = options?.env ?? process.env
-  const readFile = options?.readFile ?? ((p: string) => fs.readFileSync(p, "utf8"))
+  const { profile } = input
+  const home = input.home ?? os.homedir()
+  const env = input.env ?? process.env
+  const readFile = input.readFile ?? ((p: string) => fs.readFileSync(p, "utf8"))
+  const defaults = buildDefaults(profile, home)
 
   const warnings: string[] = []
   let sourcePath: string | null = null
   let fileOpts: Partial<WarmOptions> = {}
   let firstUnreadable: string | null = null
 
-  for (const candidate of configCandidatePaths(home, env)) {
+  for (const candidate of configCandidatePaths(input.candidateDirs, profile, home)) {
     try {
       const content = readFile(candidate)
       sourcePath = candidate
@@ -111,7 +112,7 @@ export function loadConfig(options?: {
         warnings.push(
           `lm-studio-warm is INACTIVE: ${candidate} could not be parsed — fix the file (or delete it) to choose between enabled and disabled`,
         )
-        return { active: false, reason: "invalid", warnings, sourcePath, logFile: expandHome(DEFAULTS.logFile, home) }
+        return { active: false, reason: "invalid", warnings, sourcePath, logFile: expandHome(defaults.logFile, home) }
       }
       fileOpts = parsed.opts
       break
@@ -136,7 +137,7 @@ export function loadConfig(options?: {
       reason: firstUnreadable ? "unreadable" : "missing",
       warnings,
       sourcePath,
-      logFile: expandHome(DEFAULTS.logFile, home),
+      logFile: expandHome(defaults.logFile, home),
     }
   }
 
@@ -147,14 +148,14 @@ export function loadConfig(options?: {
       `lm-studio-warm is INACTIVE: enabled is ${JSON.stringify(rawEnabled)} in ${sourcePath} — it must be the literal boolean true or false` +
         ` (YAML 1.2 reads no/off/yes/on and quoted values as strings, not booleans)`,
     )
-    return { active: false, reason: "invalid", warnings, sourcePath, logFile: inactiveLogFile(fileOpts, home) }
+    return { active: false, reason: "invalid", warnings, sourcePath, logFile: inactiveLogFile(fileOpts, defaults, home) }
   }
 
-  for (const k of unknownOptionKeys(fileOpts as Record<string, unknown>)) {
+  for (const k of unknownOptionKeys(fileOpts as Record<string, unknown>, defaults)) {
     warnings.push(`unknown option "${k}" in ${sourcePath}`)
   }
 
-  const { opts, warnings: sanitizeWarnings } = sanitizeOptions(resolveOptions(fileOpts, null))
+  const { opts, warnings: sanitizeWarnings } = sanitizeOptions(resolveOptions(defaults, fileOpts, null), defaults)
   warnings.push(...sanitizeWarnings)
 
   // Tilde in user-supplied paths is expanded, not taken literally.
@@ -173,7 +174,8 @@ export function loadConfig(options?: {
   }
 
   if (
-    opts.baseURL === DEFAULTS.baseURL &&
+    profile.envBaseUrl &&
+    opts.baseURL === defaults.baseURL &&
     typeof env.LM_STUDIO_BASE_URL === "string" &&
     env.LM_STUDIO_BASE_URL.startsWith("http")
   ) {

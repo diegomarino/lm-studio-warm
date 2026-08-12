@@ -5,7 +5,7 @@ dist/
 .cache/
 coverage/
 *.tsbuildinfo
-# scratch recordings (the shipped demo cast demo-lm-studio-warm.cast IS tracked)
+# scratch recordings (the shipped demo cast docs/demo-lm-studio-warm.cast IS tracked)
 demo-test.cast
 
 # repo-level state (main): linked worktrees and agent session dirs

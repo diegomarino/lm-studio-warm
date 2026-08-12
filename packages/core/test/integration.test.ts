@@ -4,20 +4,26 @@ import * as os from "node:os"
 import * as path from "node:path"
 
 import { describe, it, expect, beforeAll, afterEach, afterAll } from "bun:test"
-import { createAssistantMessageEventStream } from "@oh-my-pi/pi-ai"
-import type { Context, Model } from "@oh-my-pi/pi-ai"
 
 import type { LmsInstance, WarmOptions, WarmResult } from "../src/pure"
+import type { RuntimeProfile } from "../src/profile"
 
-const FAKE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "omp-lmswarm-home-"))
+const FAKE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "core-lmswarm-home-"))
 process.env.HOME = FAKE_HOME
 
 const { createWarmGate } = await import("../src/warm-gate")
-const { resolveOptions } = await import("../src/pure")
-const { createGatedStreamFn } = await import("../src/stream")
+const { resolveOptions, buildDefaults } = await import("../src/pure")
 /**
  * Integration suite: real createWarmGate against fake lms + loopback HTTP.
  */
+
+const TEST_PROFILE: RuntimeProfile = {
+  runtime: "test",
+  providers: ["lm-studio"],
+  logFile: "~/.cache/test-runtime/lm-studio-warm.log",
+  envBaseUrl: true,
+}
+const DEFAULTS = buildDefaults(TEST_PROFILE, FAKE_HOME)
 
 // FAKE_LMS: paste verbatim from opencode-warm/test/integration.test.ts
 const FAKE_LMS = `#!/usr/bin/env node
@@ -85,24 +91,6 @@ const writeOut = (s, enc) => {
 })()
 `
 
-function fakeModel(over: Partial<Model> = {}): Model {
-  return {
-    id: "k",
-    name: "k",
-    api: "lm-studio-warm",
-    provider: "lm-studio",
-    baseUrl: "http://127.0.0.1:1234/v1",
-    reasoning: false,
-    input: ["text"],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 8192,
-    maxTokens: 2048,
-    compat: {},
-    ...over,
-  } as Model
-}
-
-
 type LoadBehavior = { delayMs?: number; failuresRemaining?: number; errorText?: string; noEffect?: boolean }
 
 type FakeState = {
@@ -161,6 +149,7 @@ function makeSandbox(over: Partial<WarmOptions> = {}): Sandbox {
   const logFile = path.join(dir, "warm.log")
 
   const opts = resolveOptions(
+    DEFAULTS,
     {},
     {
       lmsPath,
@@ -353,6 +342,79 @@ describe("warm gate", () => {
     // cleanup foreign lock so sandbox cleanup is safe
     fs.rmSync(sb.opts.lockDir, { recursive: true, force: true })
   })
+
+  it("holder-recorded deadline: a waiter's own short loadTimeoutMs does not break a lock whose recorded deadline is far in the future", async () => {
+    // A short-timeout waiter must not use ITS OWN budget to judge staleness
+    // once the holder has recorded its own (possibly much longer) deadline.
+    const sb = makeSandbox({ loadTimeoutMs: 100, lockWaitTimeoutMs: 800 })
+    fs.mkdirSync(sb.opts.lockDir)
+    fs.writeFileSync(path.join(sb.opts.lockDir, "pid"), String(process.pid)) // live holder (self, so dead-pid never fires)
+    const farFutureDeadline = Date.now() + 10 * 60_000 // holder's own long budget
+    fs.writeFileSync(path.join(sb.opts.lockDir, "deadline"), String(farFutureDeadline))
+    // age the dir well past the waiter's own (short) fallback budget
+    // (loadTimeoutMs 100 + 120_000 = 120_100ms) — only the recorded deadline
+    // should matter here, not this age.
+    const old = new Date(Date.now() - 200_000)
+    fs.utimesSync(sb.opts.lockDir, old, old)
+    const pidBefore = fs.readFileSync(path.join(sb.opts.lockDir, "pid"), "utf8")
+
+    const r = await sb.warm("k")
+    expect(r.ok).toBe(false)
+    expect(r.confirmed).toBe(false)
+    expect(r.reason).toMatch(/lock contention/i)
+    expect(sb.loads("k")).toBe(0)
+    // lock must not have been broken: pid file is untouched
+    expect(fs.readFileSync(path.join(sb.opts.lockDir, "pid"), "utf8")).toBe(pidBefore)
+
+    fs.rmSync(sb.opts.lockDir, { recursive: true, force: true })
+  })
+
+  it("holder-recorded deadline: a waiter breaks the lock once the recorded deadline has passed, even with a fresh mtime", async () => {
+    const sb = makeSandbox()
+    fs.mkdirSync(sb.opts.lockDir)
+    fs.writeFileSync(path.join(sb.opts.lockDir, "pid"), String(process.pid)) // live holder (self)
+    const pastDeadline = Date.now() - 1_000
+    fs.writeFileSync(path.join(sb.opts.lockDir, "deadline"), String(pastDeadline))
+    // mtime is fresh (age ~0) — far under any age-based fallback budget, so a
+    // break here can only be driven by the recorded deadline having passed.
+    const now = new Date()
+    fs.utimesSync(sb.opts.lockDir, now, now)
+
+    const r = await sb.warm("k")
+    expect(r.ok).toBe(true)
+    expect(sb.loads("k")).toBe(1)
+  })
+
+  it("dead lock holder is broken immediately even when its recorded deadline is far in the future", async () => {
+    const sb = makeSandbox()
+    fs.mkdirSync(sb.opts.lockDir)
+    fs.writeFileSync(path.join(sb.opts.lockDir, "pid"), "2147000000") // dead
+    fs.writeFileSync(path.join(sb.opts.lockDir, "deadline"), String(Date.now() + 10 * 60_000))
+    const r = await sb.warm("k")
+    expect(r.ok).toBe(true)
+    expect(sb.loads("k")).toBe(1)
+  })
+
+  it("foreign-entry guard tolerates the deadline file alongside pid", async () => {
+    const sb = makeSandbox()
+    fs.mkdirSync(sb.opts.lockDir)
+    fs.writeFileSync(path.join(sb.opts.lockDir, "pid"), String(process.pid))
+    fs.writeFileSync(path.join(sb.opts.lockDir, "deadline"), String(Date.now() + 60_000))
+    sb.gate.releaseLockIfOurs()
+    // pid + deadline is the expected shape: releasing our own lock removes it
+    expect(fs.existsSync(sb.opts.lockDir)).toBe(false)
+  })
+
+  it("foreign-entry guard still refuses on any third entry alongside pid + deadline", async () => {
+    const sb = makeSandbox()
+    fs.mkdirSync(sb.opts.lockDir)
+    fs.writeFileSync(path.join(sb.opts.lockDir, "pid"), String(process.pid))
+    fs.writeFileSync(path.join(sb.opts.lockDir, "deadline"), String(Date.now() + 60_000))
+    fs.writeFileSync(path.join(sb.opts.lockDir, "user-data.txt"), "precious")
+    sb.gate.releaseLockIfOurs()
+    expect(fs.existsSync(path.join(sb.opts.lockDir, "user-data.txt"))).toBe(true)
+    fs.rmSync(sb.opts.lockDir, { recursive: true, force: true })
+  })
 })
 
 describe("warm gate hardening (audit regressions)", () => {
@@ -361,7 +423,7 @@ describe("warm gate hardening (audit regressions)", () => {
   it("F14: a lockDir with a missing parent still warms (parent pre-created at gate construction)", async () => {
     const sb = makeSandbox()
     const gate = createWarmGate(
-      resolveOptions({}, { ...sb.opts, lockDir: path.join(sb.dir, "missing-parent", "warm.lock") }),
+      resolveOptions(DEFAULTS, {}, { ...sb.opts, lockDir: path.join(sb.dir, "missing-parent", "warm.lock") }),
     )
     const r = await gate.warm("k", serverURL)
     expect(r.ok).toBe(true)
@@ -420,7 +482,7 @@ describe("warm gate hardening (audit regressions)", () => {
   it("F18: a missing lms binary is a confirmed failure naming the attempted path and a remedy", async () => {
     const sb = makeSandbox()
     const missingLms = path.join(sb.dir, "no-such-lms")
-    const gate = createWarmGate(resolveOptions({}, { ...sb.opts, lmsPath: missingLms }))
+    const gate = createWarmGate(resolveOptions(DEFAULTS, {}, { ...sb.opts, lmsPath: missingLms }))
     const r = await gate.warm("k", serverURL)
     expect(r.ok).toBe(false)
     expect(r.confirmed).toBe(true)
@@ -433,6 +495,7 @@ describe("warm gate hardening (audit regressions)", () => {
     const notices: string[] = []
     const gate = createWarmGate(
       resolveOptions(
+        DEFAULTS,
         {},
         {
           ...sb.opts,
@@ -470,163 +533,3 @@ describe("warm gate hardening (audit regressions)", () => {
     expect(replay.reason).toContain("boom")
   })
 })
-
-describe("createGatedStreamFn", () => {
-  it("awaits warm before calling streamCompletions", async () => {
-    const order: string[] = []
-    const warm = async () => {
-      order.push("warm")
-      return { ok: true, confirmed: false, reason: "" }
-    }
-    const streamCompletions = () => {
-      order.push("stream")
-      const s = createAssistantMessageEventStream()
-      queueMicrotask(() => {
-        const msg = {
-          role: "assistant" as const,
-          content: [],
-          api: "openai-completions",
-          provider: "lm-studio",
-          model: "k",
-          usage: {
-            input: 0,
-            output: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 0,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-          },
-          stopReason: "stop" as const,
-          timestamp: Date.now(),
-        }
-        s.push({ type: "done", reason: "stop", message: msg as any })
-      })
-      return s
-    }
-
-    const fn = createGatedStreamFn({ warm, failMode: "hybrid", logFile: "/tmp/x.log", baseURL: "http://127.0.0.1:1234/v1", streamCompletions })
-    const stream = fn(fakeModel(), { messages: [] } as Context)
-    expect(stream).toBeTruthy()
-
-    const events: unknown[] = []
-    for await (const ev of stream) events.push(ev)
-
-    expect(order).toEqual(["warm", "stream"])
-    expect(events.at(-1)).toEqual(expect.objectContaining({ type: "done" }))
-  })
-
-  it("hybrid confirmed failure emits terminal error and never streams", async () => {
-    let streamed = false
-
-    const fn = createGatedStreamFn({
-      warm: async () => ({ ok: false, confirmed: true, reason: "load failed" }),
-      failMode: "hybrid",
-      logFile: "/tmp/x.log",
-      baseURL: "http://127.0.0.1:1234/v1",
-      streamCompletions: () => {
-        streamed = true
-        return createAssistantMessageEventStream()
-      },
-    })
-
-    const stream = fn(fakeModel(), { messages: [] } as Context)
-    const events: unknown[] = []
-    for await (const ev of stream) events.push(ev)
-
-    expect(streamed).toBe(false)
-    expect(events).toHaveLength(1)
-    expect((events[0] as { type: string; error?: { errorMessage?: string } }).type).toBe("error")
-    expect(events[0]).toEqual(
-      expect.objectContaining({
-        error: expect.objectContaining({
-          errorMessage: expect.stringContaining('lm-studio-warm: cannot ensure model "k"'),
-        }),
-      }),
-    )
-  })
-
-  it("hybrid ambiguous failure fail-opens into streamCompletions", async () => {
-    let streamed = false
-
-    const fn = createGatedStreamFn({
-      warm: async () => ({ ok: false, confirmed: false, reason: "lock contention timeout" }),
-      failMode: "hybrid",
-      logFile: "/tmp/x.log",
-      baseURL: "http://127.0.0.1:1234/v1",
-      streamCompletions: () => {
-        streamed = true
-        const s = createAssistantMessageEventStream()
-        queueMicrotask(() => {
-          s.push({
-            type: "done",
-            reason: "stop",
-            message: {
-              role: "assistant",
-              content: [],
-              api: "openai-completions",
-              provider: "lm-studio",
-              model: "k",
-              usage: {
-                input: 0,
-                output: 0,
-                cacheRead: 0,
-                cacheWrite: 0,
-                totalTokens: 0,
-                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-              },
-              stopReason: "stop",
-              timestamp: Date.now(),
-            } as any,
-          })
-        })
-        return s
-      },
-    })
-
-    const events: unknown[] = []
-    for await (const ev of fn(fakeModel(), { messages: [] } as Context)) events.push(ev)
-
-    expect(streamed).toBe(true)
-    expect(events.at(-1)).toEqual(expect.objectContaining({ type: "done" }))
-  })
-
-  it("returns the outer stream synchronously (not a Promise)", () => {
-    const fn = createGatedStreamFn({
-      warm: async () => ({ ok: true, confirmed: false, reason: "" }),
-      failMode: "open",
-      logFile: "/tmp/x.log",
-      baseURL: "http://127.0.0.1:1234/v1",
-      streamCompletions: () => {
-        const s = createAssistantMessageEventStream()
-        queueMicrotask(() =>
-          s.push({
-            type: "done",
-            reason: "stop",
-            message: {
-              role: "assistant",
-              content: [],
-              api: "openai-completions",
-              provider: "lm-studio",
-              model: "k",
-              usage: {
-                input: 0,
-                output: 0,
-                cacheRead: 0,
-                cacheWrite: 0,
-                totalTokens: 0,
-                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-              },
-              stopReason: "stop",
-              timestamp: Date.now(),
-            } as any,
-          }),
-        )
-        return s
-      },
-    })
-
-    const ret = fn(fakeModel(), { messages: [] } as Context)
-    expect(typeof (ret as { then?: unknown }).then).toBe("undefined")
-  })
-})
-

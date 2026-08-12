@@ -9,7 +9,7 @@ import {
 } from "@oh-my-pi/pi-ai"
 import { createProviderErrorMessage } from "@oh-my-pi/pi-ai/providers/error-message"
 
-import { shouldFailRequest, type WarmOptions, type WarmResult } from "./pure"
+import { shouldFailRequest, type WarmOptions, type WarmResult } from "lm-studio-warm-core"
 
 type OpenAIOptions = Parameters<typeof streamOpenAICompletions>[2]
 

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/v17.11.1/schemas/config.json",
+  "release-type": "node",
+  "include-component-in-tag": true,
+  "packages": {
+    "packages/core": { "package-name": "lm-studio-warm-core", "component": "core" },
+    "packages/omp": { "package-name": "omp-lm-studio-warm", "component": "omp" },
+    "packages/pi": { "package-name": "pi-lm-studio-warm", "component": "pi" },
+    "packages/opencode": { "package-name": "opencode-lm-studio-warm", "component": "opencode" }
+  },
+  "plugins": [{ "type": "node-workspace", "updatePeerDependencies": true }]
+}

@@ -1,0 +1,61 @@
+{
+  "name": "opencode-lm-studio-warm",
+  "version": "0.2.1",
+  "description": "Deterministic LM Studio model pre-warm gate for opencode — loads and keeps the target model resident before every request, healing cold starts and mid-session TTL evictions.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src",
+    "examples",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "lmstudio",
+    "lm-studio",
+    "llm",
+    "local-llm",
+    "model-loading",
+    "prewarm",
+    "warm",
+    "bun"
+  ],
+  "license": "MIT",
+  "author": "Diego Marino <diego@petalo.xyz>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegomarino/lm-studio-warm.git",
+    "directory": "packages/opencode"
+  },
+  "homepage": "https://github.com/diegomarino/lm-studio-warm#readme",
+  "bugs": {
+    "url": "https://github.com/diegomarino/lm-studio-warm/issues"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test --timeout 30000",
+    "e2e": "test/e2e/verify.sh",
+    "check": "bun run typecheck && bun run test && shellcheck --severity=warning test/e2e/verify.sh"
+  },
+  "dependencies": {
+    "lm-studio-warm-core": "^0.1.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "1.17.10",
+    "@types/bun": "^1.3.14",
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3"
+  }
+}

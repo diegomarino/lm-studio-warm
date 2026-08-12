@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate demo-lm-studio-warm.cast (asciicast v2) for the README demo GIF.
+"""Generate docs/demo-lm-studio-warm.cast (asciicast v2) for the README demo GIF.
 
 Adapted from opencode-lmstudio-warm's tools/quickstart/generate-cast.py.
 The demo is scripted, not screen-recorded, so it stays reproducible and free
@@ -11,9 +11,9 @@ stands in for a real multi-second cold model load; unlike opencode, omp's
 status bar really does show this working message (src/stream.ts:55-56) —
 the spinner visualizes it.
 
-Run from the package root:
+Run from the repo root:
   python3 scripts/generate-quickstart-cast.py
-  agg --font-size 16 --last-frame-duration 8 demo-lm-studio-warm.cast docs/quickstart.gif
+  agg --font-size 16 --last-frame-duration 8 docs/demo-lm-studio-warm.cast docs/quickstart.gif
   python3 scripts/add-progress-bar.py docs/quickstart.gif
   gifsicle -O3 --colors 256 --batch docs/quickstart.gif
 """
@@ -120,7 +120,7 @@ header = {
     "env": {"SHELL": "/bin/zsh", "TERM": "xterm-256color"},
 }
 
-path = sys.argv[1] if len(sys.argv) > 1 else "demo-lm-studio-warm.cast"
+path = sys.argv[1] if len(sys.argv) > 1 else "docs/demo-lm-studio-warm.cast"
 with open(path, "w") as f:
     f.write(json.dumps(header) + "\n")
     for ev in events:

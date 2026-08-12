@@ -1,0 +1,6 @@
+{
+  "packages/core": "0.1.0",
+  "packages/omp": "0.1.0",
+  "packages/pi": "0.1.0",
+  "packages/opencode": "0.2.1"
+}
