@@ -1,0 +1,40 @@
+{
+  "name": "opencode-lmstudio-warm",
+  "version": "0.0.0",
+  "description": "Renamed: use opencode-lm-studio-warm. This package re-exports the new one.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Diego Marino <diego@petalo.xyz>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegomarino/lm-studio-warm.git",
+    "directory": "packages/opencode-pointer"
+  },
+  "homepage": "https://github.com/diegomarino/lm-studio-warm#readme",
+  "bugs": {
+    "url": "https://github.com/diegomarino/lm-studio-warm/issues"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "main": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "opencode-lm-studio-warm": "^0.2.1"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test --timeout 30000",
+    "check": "bun run typecheck && bun run test"
+  }
+}
