@@ -16,7 +16,7 @@
  * LM Studio contract; this suite validates the plugin's state machine
  * against the contract as documented in src/index.ts.
  */
-import { describe, it, expect, beforeAll, afterEach } from "vitest"
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "bun:test"
 import { execFileSync, spawn, type ChildProcess } from "node:child_process"
 import * as fs from "node:fs"
 import * as http from "node:http"
@@ -27,8 +27,8 @@ import * as path from "node:path"
 // from the machine running the tests BEFORE the plugin module is imported.
 const FAKE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "lmswarm-home-"))
 process.env.HOME = FAKE_HOME
-const { LMStudioWarm } = await import("../src/index.ts")
-import type { WarmOptions, LmsInstance } from "../src/index.ts"
+const { LMStudioWarm } = await import("../src/index")
+import type { WarmOptions, LmsInstance } from "../src/index"
 
 // Each plugin instance registers a process "exit" listener; with one instance
 // per test the default max-listeners warning would fire spuriously.
@@ -142,9 +142,10 @@ beforeAll(async () => {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r))
   const addr = server.address() as { port: number }
   serverURL = `http://127.0.0.1:${addr.port}/v1`
-  return async () => {
-    await new Promise((r) => server.close(r))
-  }
+})
+
+afterAll(async () => {
+  await new Promise<void>((r) => server.close(() => r()))
 })
 
 const sandboxes: Sandbox[] = []
@@ -284,8 +285,10 @@ describe("failures and negative caches", () => {
     const hooks = await sb.plugin({ retryCooldownMs: 60_000 })
     await expect(hooks["chat.params"](sb.chatInput("k"))).rejects.toThrow(/cannot ensure model "k"/)
     expect(sb.loads("k")).toBe(1)
-    // Second request inside the cooldown: fails fast, NO second lms load.
-    await expect(hooks["chat.params"](sb.chatInput("k"))).rejects.toThrow(/cooldown/)
+    // Second request inside the cooldown: fails fast, NO second lms load. Core's
+    // replayed-verdict message reads "cached failure from …s ago" (it names the
+    // cooldown as history, not a fresh probe) rather than the old "(cooldown)".
+    await expect(hooks["chat.params"](sb.chatInput("k"))).rejects.toThrow(/cached failure/)
     expect(sb.loads("k")).toBe(1)
   })
 
@@ -315,7 +318,6 @@ describe("failures and negative caches", () => {
 
   it(
     "server down: confirmed failure, and the server negative cache prevents re-paying the bring-up stall",
-    { timeout: 20_000 },
     async () => {
       const sb = makeSandbox()
       const deadURL = "http://127.0.0.1:9" // discard port — connection refused
@@ -333,6 +335,7 @@ describe("failures and negative caches", () => {
       expect(Date.now() - t0).toBeLessThan(500)
       expect(sb.calls().filter((c) => c[0] === "server").length).toBe(1)
     },
+    20_000,
   )
 })
 
@@ -373,17 +376,19 @@ describe("cross-process lock", () => {
 
   it(
     "live holder: waits, times out, and (hybrid) proceeds fail-open without loading",
-    { timeout: 15_000 },
     async () => {
       const sb = makeSandbox()
       const holder: ChildProcess = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" })
-      sb.cleanup.push(() => holder.kill("SIGKILL"))
+      sb.cleanup.push(() => {
+        holder.kill("SIGKILL")
+      })
       plantLock(sb, String(holder.pid))
       const hooks = await sb.plugin({ lockWaitTimeoutMs: 1_500 })
       await expect(hooks["chat.params"](sb.chatInput("k"))).resolves.toBeUndefined()
       expect(sb.loads("k")).toBe(0) // never loaded — someone else plausibly is
       expect(fs.existsSync(sb.lockDir)).toBe(true) // and their lock was respected
     },
+    15_000,
   )
 
   it("dead holder: breaks the stale lock and completes the load", async () => {

@@ -1,9 +1,11 @@
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect, spyOn } from "bun:test"
+import * as os from "node:os"
 import {
-  resolveOptions,
-  sanitizeOptions,
-  unknownOptionKeys,
-  parseFileOptions,
+  buildDefaults,
+  resolveOptions as coreResolveOptions,
+  sanitizeOptions as coreSanitizeOptions,
+  unknownOptionKeys as coreUnknownOptionKeys,
+  parseConfigFile,
   addressable,
   classifyPs,
   parseLmsJsonArray,
@@ -20,9 +22,20 @@ import {
   isMemoryPressureError,
   type WarmOptions,
   type LmsInstance,
-} from "../src/index.ts"
+} from "lm-studio-warm-core"
+import { OPENCODE_PROFILE } from "../src/config"
 
 const MiB = 1024 * 1024
+
+// The opencode-shaped defaults these pure helpers are exercised against. The
+// core functions take `defaults` explicitly (they are host-agnostic); these
+// thin wrappers bind opencode's profile so the assertions below read exactly as
+// they did against the old inlined, opencode-defaulted helpers.
+const DEFAULTS = buildDefaults(OPENCODE_PROFILE, os.homedir())
+const resolveOptions = (fileOpts: Partial<WarmOptions>, pluginOpts?: Partial<WarmOptions> | null): WarmOptions =>
+  coreResolveOptions(DEFAULTS, fileOpts, pluginOpts ?? undefined)
+const sanitizeOptions = (o: WarmOptions) => coreSanitizeOptions(o, DEFAULTS)
+const unknownOptionKeys = (raw: Record<string, unknown>) => coreUnknownOptionKeys(raw, DEFAULTS)
 
 // A concrete options object for loadArgs tests (only the fields it reads matter).
 function opts(over: Partial<WarmOptions> = {}): WarmOptions {
@@ -146,25 +159,28 @@ describe("sanitizeOptions", () => {
   })
 })
 
-describe("parseFileOptions", () => {
-  const SRC = "/x/lmstudio-warm.json"
+// Core's `parseConfigFile` replaces the old opencode-local `parseFileOptions`.
+// Same {opts, warning} contract; the diagnostic wording is core's (the audited
+// superset) — "failed to parse …" and "must contain a top-level object".
+describe("parseConfigFile", () => {
+  const SRC = "/x/lm-studio-warm.json"
 
   it("parses a valid JSON object with no warning", () => {
-    expect(parseFileOptions('{"parallel": 2}', SRC)).toEqual({ opts: { parallel: 2 }, warning: null })
+    expect(parseConfigFile('{"parallel": 2}', SRC)).toEqual({ opts: { parallel: 2 }, warning: null })
   })
 
   it("warns (instead of silently ignoring) on malformed JSON", () => {
-    const { opts, warning } = parseFileOptions('{"parallel": 2', SRC)
+    const { opts, warning } = parseConfigFile('{"parallel": 2', SRC)
     expect(opts).toEqual({})
     expect(warning).toContain(SRC)
-    expect(warning).toContain("not valid JSON")
+    expect(warning).toContain("failed to parse")
   })
 
   it("warns when the top level is not an object", () => {
     for (const bad of ["[1]", '"str"', "null", "42"]) {
-      const { opts, warning } = parseFileOptions(bad, SRC)
+      const { opts, warning } = parseConfigFile(bad, SRC)
       expect(opts).toEqual({})
-      expect(warning).toContain("must contain a JSON object")
+      expect(warning).toContain("must contain a top-level object")
     }
   })
 })
@@ -346,7 +362,7 @@ describe("pidAlive", () => {
   })
 
   it("treats ESRCH (no such process) as dead", () => {
-    const spy = vi.spyOn(process, "kill").mockImplementation(() => {
+    const spy = spyOn(process, "kill").mockImplementation(() => {
       const e = new Error("no such process") as NodeJS.ErrnoException
       e.code = "ESRCH"
       throw e
@@ -356,7 +372,7 @@ describe("pidAlive", () => {
   })
 
   it("treats EPERM (owned by another user) as alive", () => {
-    const spy = vi.spyOn(process, "kill").mockImplementation(() => {
+    const spy = spyOn(process, "kill").mockImplementation(() => {
       const e = new Error("operation not permitted") as NodeJS.ErrnoException
       e.code = "EPERM"
       throw e

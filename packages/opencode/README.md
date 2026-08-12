@@ -1,4 +1,4 @@
-# opencode-lmstudio-warm
+# opencode-lm-studio-warm
 
 Deterministic, dependency-free model pre-warm for **opencode + LM Studio**.
 Guarantees your model is loaded and addressable _before_ any request leaves
@@ -38,9 +38,9 @@ behaviors the plugin depends on are the `lms ps --json` field names
 npm and adds it to your config's `plugin` array:
 
 ```bash
-opencode plugin -g opencode-lmstudio-warm    # global (~/.config/opencode) — every session on the machine
+opencode plugin -g opencode-lm-studio-warm    # global (~/.config/opencode) — every session on the machine
 # or, for a single project's opencode.json:
-opencode plugin opencode-lmstudio-warm
+opencode plugin opencode-lm-studio-warm
 ```
 
 **2. Point opencode at LM Studio** (skip if you already have an `lmstudio`
@@ -48,7 +48,7 @@ provider). In `~/.config/opencode/opencode.json`:
 
 ```jsonc
 {
-  "plugin": ["opencode-lmstudio-warm"],
+  "plugin": ["opencode-lm-studio-warm"],
   "provider": {
     "lmstudio": {
       "npm": "@ai-sdk/openai-compatible",
@@ -92,7 +92,7 @@ The Quick start command above is all you need. Notes:
 
 - You don't run `npm install` / `bun add` yourself, and there's no `npx` step —
   opencode imports the module and auto-installs any plugin named in your config
-  at startup, so hand-adding `"opencode-lmstudio-warm"` to the `plugin` array
+  at startup, so hand-adding `"opencode-lm-studio-warm"` to the `plugin` array
   works too.
 - Use `-f` to force a version bump.
 
@@ -105,7 +105,7 @@ models, and never overwrites options you've set.
 CFG=~/.config/opencode/opencode.json   # or ./opencode.json for a single project
 [ -f "$CFG" ] || echo '{}' > "$CFG"
 jq '
-  .plugin = ((.plugin // []) - ["opencode-lmstudio-warm"] + ["opencode-lmstudio-warm"])
+  .plugin = ((.plugin // []) - ["opencode-lm-studio-warm"] + ["opencode-lm-studio-warm"])
   | .provider.lmstudio.npm                  //= "@ai-sdk/openai-compatible"
   | .provider.lmstudio.options.baseURL      //= "http://127.0.0.1:1234/v1"
   | .provider.lmstudio.options.apiKey       //= "{env:LM_API_TOKEN}"
@@ -139,8 +139,10 @@ the JSON/`jq` above.
 ## Configuration
 
 The plugin works with zero configuration. Optional tuning lives in
-`~/.config/opencode/lmstudio-warm.json` (or inline as
-`"plugin": [["opencode-lmstudio-warm", {...}]]`).
+`~/.config/opencode/lm-studio-warm.json` (the legacy `lmstudio-warm.json`
+filename is still read for backward compatibility), or inline as
+`"plugin": [["opencode-lm-studio-warm", {...}]]`. Set `"enabled": false` in the
+JSON file to turn the gate off without uninstalling.
 
 > **Scope:** the plugin manages the **local** LM Studio through the `lms` CLI.
 > `baseURL` (and any gated provider's `baseURL`) must point at this same
@@ -170,8 +172,8 @@ The plugin works with zero configuration. Optional tuning lives in
 | `evictHeadroomMB` | `4096` | Flat safety margin (MB) added over a model's on-disk weight size when deciding whether it fits. Deliberately flat, not a KV-cache estimate (see note below); raise it for large `contextLength` / `parallel`. |
 | `evictProtect` | `[]` | Model keys (or instance identifiers) eviction must never unload. |
 | `evictMaxVictims` | `8` | Max instances eviction may unload per warm attempt (predictive + reactive combined). Caps worst-case lock-hold time; `0` = unlimited. |
-| `logFile` | `~/.cache/opencode/lmstudio-warm.log` | Plugin log file; rotated to `<logFile>.old` once it grows past ~5 MB. |
-| `lockDir` | `~/.cache/opencode/lmstudio-warm.lock` | Cross-process lock directory. |
+| `logFile` | `~/.cache/opencode/lm-studio-warm.log` | Plugin log file; rotated to `<logFile>.old` once it grows past ~5 MB. |
+| `lockDir` | `~/.cache/lm-studio-warm/lock` | Cross-process lock directory. Shared across all lm-studio-warm runtimes (omp / pi / opencode) so they contend on the one physical LM Studio instance. |
 
 ### Freeing RAM: two strategies
 
@@ -290,13 +292,13 @@ reconciled back to an addressable instance. See
 
 ## Uninstall / rollback
 
-For the npm install path, remove `"opencode-lmstudio-warm"` from the `plugin`
+For the npm install path, remove `"opencode-lm-studio-warm"` from the `plugin`
 array in `opencode.json`. For the file-copy paths:
 
 ```bash
 rm ~/.config/opencode/plugin/lmstudio-warm.ts   # removes the gate everywhere
-rm -f ~/.config/opencode/lmstudio-warm.json     # optional tuning file
-rm -rf ~/.cache/opencode/lmstudio-warm.lock     # only if a stale lock lingers
+rm -f ~/.config/opencode/lm-studio-warm.json    # optional tuning file (or legacy lmstudio-warm.json)
+rm -rf ~/.cache/lm-studio-warm/lock             # only if a stale lock lingers (shared lock dir)
 ```
 
 Models loaded by the plugin have no TTL, so after uninstalling they stay
@@ -397,26 +399,29 @@ cannot heal mid-session evictions; the plugin does.
 
 ## Development
 
-The plugin is a single file with **no runtime dependencies** (its only import,
-`@opencode-ai/plugin`, is `import type` and erased at build time). The root
-`package.json` pulls that type package and `@types/node` as devDependencies so
-you can type-check locally:
+The plugin is a thin adapter over the shared
+[`lm-studio-warm-core`](../core) package — the pure helpers, the `lms` client,
+and the audited warm gate all live in core; `src/index.ts` keeps only the
+opencode-specific hooks, input-shape reads, and two-tier config activation. Its
+only other import, `@opencode-ai/plugin`, is `import type` and erased at build
+time. From the monorepo root:
 
 ```bash
 bun install
-bun run typecheck        # tsc --strict, 0 errors
-bun run test             # vitest unit tests for the pure logic (test/)
-bun run check            # typecheck + tests + shellcheck
-bun run e2e              # live E2E fixture (needs LM Studio; see test/e2e/)
+bun run --filter './packages/opencode' typecheck   # tsc --strict, 0 errors
+bun run --filter './packages/opencode' test         # bun test (unit + integration, test/)
+bun run --filter './packages/opencode' check        # typecheck + tests + shellcheck
+bun run --filter './packages/opencode' e2e          # live E2E fixture (needs LM Studio; see test/e2e/)
 ```
 
-The pure, per-process-stateless logic (config merge, model-ref parsing, load-arg
-building, addressability, pid liveness, fail-mode decisions) is exported from
-`src/index.ts` and unit-tested under `test/`; the live system behavior is covered
-by the E2E fixture under [`test/e2e/`](./test/e2e/).
+The pure logic (config merge, model-ref parsing, load-arg building,
+addressability, pid liveness, fail-mode decisions) is unit-tested against core
+under `test/unit.test.ts`; the plugin's stateful behavior (warm gate, lock,
+reconciliation, eviction, the `chat.params` gate) is covered by
+`test/integration.test.ts`, and the live system behavior by the E2E fixture
+under [`test/e2e/`](./test/e2e/).
 
-Releases follow [SemVer](https://semver.org) and are cut automatically by
-semantic-release on every push to `main` — Conventional Commits decide the
+Releases follow [SemVer](https://semver.org); Conventional Commits decide the
 bump (see [`CHANGELOG.md`](./CHANGELOG.md)).
 
 ## Disclaimer
