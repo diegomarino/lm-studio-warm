@@ -33,7 +33,7 @@ export function loadOpencodeConfig(options?: {
   env?: NodeJS.ProcessEnv
   readFile?: (p: string) => string
 }): ConfigLoadResult {
-  const home = options?.home ?? process.env.HOME ?? os.homedir()
+  const home = options?.home ?? (process.env.HOME || os.homedir())
   return loadConfigFrom({
     candidateDirs: [path.join(home, ".config/opencode")],
     profile: OPENCODE_PROFILE,

@@ -15,7 +15,7 @@
     "demo:record": "bash ./scripts/record-demo.sh",
     "release-please:validate": "release-please --help > /dev/null"
   },
-  "overrides": { "adm-zip": ">=0.6.0", "sharp": ">=0.35.0" },
+  "overrides": { "adm-zip": ">=0.6.0", "sharp": ">=0.35.0", "undici": ">=8.10.0" },
   "devDependencies": {
     "release-please": "17.11.1",
     "typescript": "^5.8.3",
