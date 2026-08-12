@@ -208,6 +208,23 @@ describe("sanitizeOptions", () => {
     expect(warnings.length).toBeGreaterThanOrEqual(2)
   })
 
+  it("drops a wrong-typed (non-number) perModel field, distinct from the negative-number arm above", () => {
+    const { opts: o, warnings } = sanitizeOptions(
+      resolveOptions(
+        DEFAULTS,
+        {
+          perModel: {
+            m: { contextLength: "8192" as never, parallel: 2 } as never,
+          },
+        },
+        null,
+      ),
+      DEFAULTS,
+    )
+    expect(o.perModel.m).toEqual({ parallel: 2 })
+    expect(warnings.some((w) => w.includes('perModel["m"].contextLength must be a non-negative number'))).toBe(true)
+  })
+
   it("resets evictMaxVictims when negative", () => {
     const { opts: o, warnings } = sanitizeOptions(resolveOptions(DEFAULTS, { evictMaxVictims: -1 }, null), DEFAULTS)
     expect(o.evictMaxVictims).toBe(8)
