@@ -6,7 +6,7 @@ It is opt-in: if no config file exists, it does nothing and omp keeps its built-
 
 ![Quick start: opt in with a config file, LM Studio starts cold, the first omp request warms the model before it leaves, and lms ps shows the model resident with no TTL](../../docs/quickstart.gif)
 
-<sup>Scripted demo (`scripts/generate-quickstart-cast.py`) — the status/log lines are the plugin's real strings (`src/stream.ts`, `src/warm-gate.ts`); the cold-load wait is shortened. Unlike opencode, omp really does show the warming message in its status area while the gate holds the request.</sup>
+<sup>Scripted demo (`scripts/generate-quickstart-cast.py`) — the status/log lines are the plugin's real strings (this package's `src/stream.ts` and the shared [`lm-studio-warm-core`](../core)'s `src/warm-gate.ts`); the cold-load wait is shortened. Unlike opencode, omp really does show the warming message in its status area while the gate holds the request.</sup>
 
 ## What it does
 
@@ -23,14 +23,15 @@ This removes in-flight cold-load latency spikes and makes memory-pressure behavi
 
 > **Not published yet.** There is currently no GitHub release or npm package;
 > install from a local checkout. Once the repository is published, the command
-> will be `omp plugin install github:diegomarino/omp-lm-studio-warm#<tag>`
-> (pin a tag — do not install from a moving branch).
+> will be `omp plugin install github:diegomarino/lm-studio-warm#<tag>`, pointed
+> at the `packages/omp` directory of that tag (pin a tag — do not install from
+> a moving branch).
 
 ```bash
-# from a local checkout
-omp plugin link /path/to/omp-lm-studio-warm
+# from a local checkout of the lm-studio-warm monorepo
+omp plugin link /path/to/lm-studio-warm/packages/omp
 # or run directly
-omp --extension ./src/index.ts
+omp --extension /path/to/lm-studio-warm/packages/omp/src/index.ts
 ```
 
 ## Activate
@@ -51,12 +52,15 @@ Its **presence** activates the plugin.
 - A config that exists but cannot be read or parsed also deactivates the
   plugin, with a warning in the session UI and the log.
 
-Config directory resolution: the plugin reads `~/.omp/agent/` by default. If
-`PI_CODING_AGENT_DIR` is set (the host's session-storage override), the plugin
-reads `lm-studio-warm.{yml,yaml,json}` from that directory instead. The host's
-`PI_CONFIG_DIR` and profile mechanism are **not** consulted — if you relocate
-your omp config with those, this plugin's config file stays under
-`~/.omp/agent/` (or `PI_CODING_AGENT_DIR`).
+Config directory resolution is delegated entirely to omp's own `getAgentDir()`
+(from `@oh-my-pi/pi-coding-agent`) — this plugin does not hard-code
+`~/.omp/agent/` itself, it probes `lm-studio-warm.{yml,yaml,json}` inside
+whatever directory `getAgentDir()` returns. In the common case that resolves
+to `~/.omp/agent/`; `PI_CODING_AGENT_DIR` (the session-storage override) and
+any profile-selection mechanism are the **host's** semantics — owned and
+documented by `@oh-my-pi/pi-coding-agent`, not by this plugin — so if you
+relocate your omp config directory via the host, this plugin's config file
+follows it automatically.
 
 Example:
 
@@ -80,44 +84,11 @@ YAML
 
 ## Configuration
 
-> This table is the **canonical** configuration reference (the design spec
-> links here instead of duplicating it). Defaults are from `src/pure.ts`.
->
-> Config handling is two-tier: `enabled` and file parseability are strict (any
-> problem deactivates the plugin, visibly). Every other option is resilient —
-> an invalid value is repaired to its default and a warning is written to the
-> log **and** shown once in the session UI. Unknown keys warn the same way, so
-> check the warnings after upgrading if an option was renamed.
->
-> `~` at the start of `lmsPath`, `logFile`, and `lockDir` expands to your home
-> directory.
-
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `enabled` | boolean | `true` | Global kill switch. |
-| `providers` | string[] | `['lm-studio']` | Only matching provider IDs get warm-gated. |
-| `lmsPath` | string | `~/.lmstudio/bin/lms` (if exists) else `lms` | `lms` executable path. |
-| `baseURL` | string | `http://127.0.0.1:1234/v1` | LM Studio HTTP base URL for checks/streams. |
-| `ttlSeconds` | number | `0` | Default `lms load --ttl` (`0` omits flag). |
-| `parallel` | number | `0` | Default `lms load --parallel` (`0` omits flag). |
-| `contextLength` | number | `0` | Default `lms load --context-length` (`0` omits flag). |
-| `perModel` | object | `{}` | Per-model overrides for `ttlSeconds`, `parallel`, `contextLength`. |
-| `verifyCacheMs` | number | `30000` | Skip re-ps checks for this window after confirmed warm. |
-| `retryCooldownMs` | number | `60000` | Cooldown before retrying previously failed keys. |
-| `loadTimeoutMs` | number | `900000` | Timeout for `lms load`. |
-| `serverStartTimeoutMs` | number | `90000` | LM Studio server probe timeout. |
-| `lockWaitTimeoutMs` | number | `1200000` | Cross-process lock wait timeout for warm. |
-| `failMode` | `open` \| `closed` \| `hybrid` | `hybrid` | Failure strategy when warm can’t be confirmed. |
-| `reconcileDuplicates` | boolean | `true` | Remove idle `modelKey:2` duplicate before loading base key. |
-| `launchAppFallback` | boolean | `true` | macOS: launch LM Studio app if server unavailable. |
-| `eager` | boolean | `true` | On session start, warm `ctx.models.current()` and `@smol` in background. |
-| `evictOnPressure` | boolean | `false` | Enable proactive/reactive eviction and retry. |
-| `ramBudgetMB` | number | `0` | RAM budget in MB (`0` = 90% of system RAM). |
-| `evictHeadroomMB` | number | `4096` | Additional headroom before deciding to evict. |
-| `evictProtect` | string[] | `[]` | Model IDs never evicted during pressure handling. |
-| `evictMaxVictims` | number | `8` | Max LRU victims per run (`0` = unlimited). |
-| `logFile` | string | `~/.cache/omp/lm-studio-warm.log` | Log file path. |
-| `lockDir` | string | `~/.cache/lm-studio-warm/lock` | Cross-process lock directory. |
+See [`packages/core/README.md`](../core/README.md#configuration-reference) for
+the canonical, shared option reference — every `WarmOptions` key, its default,
+and its tier (identity vs. tuning) — plus the full lock/staleness semantics.
+This package uses those options unchanged, with omp-shaped defaults:
+`providers: ['lm-studio']` and `logFile: ~/.cache/omp/lm-studio-warm.log`.
 
 ## Fail mode behavior
 
@@ -179,6 +150,17 @@ stream request ──> createGatedStreamFn
   > old path is simply unused going forward — but if you previously pointed
   > `lockDir` at that path explicitly, you can drop the override to join the
   > shared lock, or keep it if you want omp isolated from other runtimes.
+
+  > **Mixed-version rollout:** a pre-monorepo omp release only knows about a
+  > `pid` file inside the lock directory — it does not recognize the new
+  > holder-recorded `deadline` file this release writes. When an old-format
+  > omp process waits on a lock held by a new-format holder, it treats
+  > `deadline` as an unexpected entry and refuses to break the lock early (the
+  > same conservative behavior the foreign-entry guard documents above); it
+  > simply waits out its own `lockWaitTimeoutMs` and then fails open with
+  > `lock contention timeout waiting to warm …`. It will not corrupt or delete
+  > the lock. Upgrade every runtime sharing a `lockDir` together to avoid this
+  > during a rollout.
 
 ## Demo (asciinema)
 
@@ -253,6 +235,7 @@ MIT. See [LICENSE](./LICENSE).
 
 ## Project documentation
 
-- Design spec: `docs/superpowers/specs/2026-08-10-omp-lm-studio-warm-design.md` (Accepted)
-- Implementation plan: `docs/superpowers/plans/2026-08-10-omp-lm-studio-warm.md` (see its deviations note)
-- Audits: `docs/audits/2026-08-11-6ab77c9/` — five adversarial reports, the consolidated fixes backlog, and the fix ledger
+- Design spec: [`../../docs/superpowers/specs/2026-08-10-omp-lm-studio-warm-design.md`](../../docs/superpowers/specs/2026-08-10-omp-lm-studio-warm-design.md) (Accepted)
+- Implementation plan: [`../../docs/superpowers/plans/2026-08-10-omp-lm-studio-warm.md`](../../docs/superpowers/plans/2026-08-10-omp-lm-studio-warm.md) (see its deviations note)
+- Audits: [`../../docs/audits/2026-08-11-6ab77c9/`](../../docs/audits/2026-08-11-6ab77c9/) — five adversarial reports, the consolidated fixes backlog, and the fix ledger
+- Monorepo design spec: [`../../docs/superpowers/specs/2026-08-11-lm-studio-warm-monorepo-design.md`](../../docs/superpowers/specs/2026-08-11-lm-studio-warm-monorepo-design.md)

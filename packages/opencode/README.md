@@ -149,31 +149,11 @@ JSON file to turn the gate off without uninstalling.
 > machine — a non-loopback URL is logged as a warning, and the gate can
 > neither verify nor load models on a remote server.
 
-| Option | Default | What it does |
-| -------- | --------- | -------------- |
-| `providers` | `["lmstudio"]` | Provider IDs to gate; requests on other providers are ignored. All listed providers must address the local LM Studio. |
-| `lmsPath` | `~/.lmstudio/bin/lms` if present, else `lms` | Path to the `lms` CLI. |
-| `baseURL` | `http://127.0.0.1:1234/v1` | Fallback base URL when the provider config doesn't carry one. Must be loopback. |
-| `ttlSeconds` | `0` | `--ttl` for `lms load`; `0` omits the flag (resident until unloaded). The GUI "JIT auto-unload TTL" does **not** govern these explicit loads — set this to get time-based auto-unload. See [Freeing RAM](#freeing-ram-two-strategies). |
-| `parallel` | `0` | `--parallel` for `lms load`; `0` omits it (LM Studio default, currently 4). Size ≈ concurrent fleet width; overflow queues server-side. |
-| `contextLength` | `0` | `--context-length` for `lms load`; `0` omits it (model default). |
-| `perModel` | `{}` | Per-model-key overrides of `ttlSeconds` / `parallel` / `contextLength`. |
-| `verifyCacheMs` | `30000` | How long a positive residency verdict is trusted before re-checking. |
-| `retryCooldownMs` | `60000` | After a confirmed load failure, don't retry the same key for this long (prevents load storms). |
-| `loadTimeoutMs` | `900000` | Hard cap on a single `lms load` (a cold big-model load can take minutes). |
-| `serverStartTimeoutMs` | `90000` | Hard cap on bringing the HTTP server up. |
-| `lockWaitTimeoutMs` | `1200000` | Max wait for another process's in-flight load before proceeding fail-open. |
-| `failMode` | `"hybrid"` | `hybrid`: confirmed failures fail the request with a clear error, ambiguous ones proceed fail-open. `open`: never fail. `closed`: any warm failure fails the request. |
-| `reconcileDuplicates` | `true` | Unload idle suffixed duplicates (`key:2` …) and load fresh when the bare key isn't addressable. |
-| `launchAppFallback` | `true` | If the server won't start, try `open -ga "LM Studio"` once (macOS only). |
-| `eager` | `true` | Background-warm `model` + `small_model` at instance start. |
-| `evictOnPressure` | `false` | Opt-in RAM-pressure eviction: before loading a model that won't fit, unload **idle** instances (never busy, never the target, never protected) in LRU order to make room, then load. Off by default. See below. |
-| `ramBudgetMB` | `0` | RAM the fleet may use for LM Studio, in MB. `0` = auto (90% of total physical memory). The fit calc measures room against this — **not** `os.freemem()`, which under-reports available memory on macOS. |
-| `evictHeadroomMB` | `4096` | Flat safety margin (MB) added over a model's on-disk weight size when deciding whether it fits. Deliberately flat, not a KV-cache estimate (see note below); raise it for large `contextLength` / `parallel`. |
-| `evictProtect` | `[]` | Model keys (or instance identifiers) eviction must never unload. |
-| `evictMaxVictims` | `8` | Max instances eviction may unload per warm attempt (predictive + reactive combined). Caps worst-case lock-hold time; `0` = unlimited. |
-| `logFile` | `~/.cache/opencode/lm-studio-warm.log` | Plugin log file; rotated to `<logFile>.old` once it grows past ~5 MB. |
-| `lockDir` | `~/.cache/lm-studio-warm/lock` | Cross-process lock directory. Shared across all lm-studio-warm runtimes (omp / pi / opencode) so they contend on the one physical LM Studio instance. |
+See [`packages/core/README.md`](../core/README.md#configuration-reference) for
+the canonical, shared option reference — every `WarmOptions` key, its default,
+and its tier (identity vs. tuning) — plus the full lock/staleness semantics.
+This package uses those options unchanged, with opencode-shaped defaults:
+`providers: ['lmstudio']` and `logFile: ~/.cache/opencode/lm-studio-warm.log`.
 
 ### Freeing RAM: two strategies
 
@@ -212,7 +192,7 @@ model resident, let the big one expire). See
 
 **Pressure-based** — keep models resident and let the gate make room on demand;
 see [RAM-pressure eviction](#ram-pressure-eviction-opt-in) below for the full
-mechanism and [`examples/lmstudio-warm.json`](./examples/lmstudio-warm.json).
+mechanism and [`examples/lm-studio-warm.json`](./examples/lm-studio-warm.json).
 
 ### RAM-pressure eviction (opt-in)
 
@@ -260,8 +240,9 @@ unloaded per attempt, bounding worst-case lock-hold time.
 > case is enough. If loads are still refused with large context or parallelism,
 > raise `evictHeadroomMB`.
 
-See `examples/lmstudio-warm.json` for a starting point with every option
-visible. Copy it to `~/.config/opencode/lmstudio-warm.json` and replace the
+See `examples/lm-studio-warm.json` for a starting point with every option
+visible. Copy it to `~/.config/opencode/lm-studio-warm.json` (the legacy
+`lmstudio-warm.json` filename is still read as a fallback) and replace the
 `your-*-model-key` placeholders with your real model keys — the `perModel` and
 `evictProtect` entries do nothing until they match a key opencode actually sends.
 `perModel` keys are LM Studio model keys — the exact string opencode sends as

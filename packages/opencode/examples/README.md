@@ -1,6 +1,6 @@
 # Examples
 
-Reference configs for `opencode-lmstudio-warm`. Neither is enabled by copying
+Reference configs for `opencode-lm-studio-warm`. Neither is enabled by copying
 the repo — take the pieces you need into your own files and replace the
 `your-*-model-key` placeholders with your real LM Studio model keys (the exact
 strings opencode sends as the API `model` field).
@@ -16,11 +16,13 @@ to register the plugin and add only the provider block by hand.
 
 Set `model` / `small_model` to your own model keys before use.
 
-## `lmstudio-warm.json` — tuning the plugin
+## `lm-studio-warm.json` — tuning the plugin
 
 A starting point with every option shown explicitly. Copy it to
-`~/.config/opencode/lmstudio-warm.json` (or pass the same object as plugin
-options in `opencode.json`). Highlights:
+`~/.config/opencode/lm-studio-warm.json` (or pass the same object as plugin
+options in `opencode.json`). The legacy filename `lmstudio-warm.json` is still
+read as a fallback if `lm-studio-warm.json` doesn't exist, for backward
+compatibility with installs from before the rename. Highlights:
 
 - **`failMode: "hybrid"`** — confirmed failures (server down, load failed,
   unreconcilable duplicates) fail the request with a clear error; ambiguous lock
@@ -43,5 +45,5 @@ options in `opencode.json`). Highlights:
   use from the UI or other clients is not protected; use `evictProtect` for
   models that must never be touched.
 
-See the [README's Configuration section](../README.md#configuration) for the full
-option list and defaults.
+See the [core package's Configuration reference](../../core/README.md#configuration-reference)
+for the full option list and defaults.

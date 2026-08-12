@@ -6,18 +6,17 @@ usage deterministic by warming target models before each `lm-studio` streaming r
 It is opt-in: if no config file exists, it does nothing and `pi` keeps its built-in `lm-studio`
 behavior.
 
-> **Status:** scaffold only. Config loading and the inactive paths (missing/disabled/invalid config)
-> are implemented; provider registration and gated streaming land in a follow-up commit. Until then,
-> an active config is acknowledged with a single log line and otherwise left untouched.
-
 ## What it does
 
-For every stream request routed through provider `lm-studio`, once fully wired, the plugin will:
+For every stream request routed through provider `lm-studio`, the plugin:
 
-1. Wait for `createWarmGate` (from `lm-studio-warm-core`) to ensure the model is already resident.
-2. If warm is confirmed, delegate to the normal completion stream.
+1. Waits for `createWarmGate` (from `lm-studio-warm-core`) to ensure the model is already resident.
+2. If warm is confirmed, delegates to the normal completion stream.
 3. If warm is ambiguous (policy-dependent), it can fail-open and let the request proceed.
 4. If warm is a confirmed hard failure (policy-dependent), it emits a terminal error event.
+
+It also registers a native `lm-studio` provider (via `@earendil-works/pi-ai`'s `createProvider`) and
+eagerly warms the current model in the background on session start when `eager` is enabled.
 
 This removes in-flight cold-load latency spikes and makes memory-pressure behavior explicit
 (`evictOnPressure`).
@@ -75,9 +74,23 @@ YAML
 
 ## Configuration
 
-See [`packages/omp/README.md`](../omp/README.md#configuration) for the canonical, shared option
-reference (defaults live in `packages/core/src/pure.ts`). This package uses the same options with a
-`pi`-shaped default `logFile` of `~/.cache/pi/lm-studio-warm.log`.
+See [`packages/core/README.md`](../core/README.md#configuration-reference) for the canonical,
+shared option reference — every `WarmOptions` key, its default, and its tier (identity vs. tuning)
+— plus the full lock/staleness semantics. This package uses those options unchanged, with
+`pi`-shaped defaults: `providers: ['lm-studio']` and `logFile: ~/.cache/pi/lm-studio-warm.log`.
+
+### Model snapshot refresh limitation
+
+`pi` has no `fetchDynamicModels` hook — this package registers its provider with a baseline
+`models` snapshot taken at startup, then refreshes it via `refreshModels()` on each request. `pi-ai`
+merges that refresh as an overlay on top of the baseline snapshot rather than replacing it, so:
+
+- Models **added or updated** in LM Studio propagate on the next `refreshModels()` call (i.e. the
+  next request) — no restart needed.
+- Models **removed** from LM Studio do **not** disappear from the provider's model list until the
+  `pi` session restarts, because the baseline snapshot entry is never pruned mid-session. Warming a
+  removed model will still fail (the gate cannot make a nonexistent model resident); it just stays
+  listed as an option until restart.
 
 ## Logs / lock paths
 
@@ -110,4 +123,4 @@ MIT. See [LICENSE](./LICENSE).
 
 ## Project documentation
 
-- Design spec: `docs/superpowers/specs/2026-08-11-lm-studio-warm-monorepo-design.md`
+- Monorepo design spec: [`../../docs/superpowers/specs/2026-08-11-lm-studio-warm-monorepo-design.md`](../../docs/superpowers/specs/2026-08-11-lm-studio-warm-monorepo-design.md)

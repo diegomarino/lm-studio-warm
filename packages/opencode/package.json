@@ -33,12 +33,12 @@
   "author": "Diego Marino <diego@petalo.xyz>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/diegomarino/opencode-lmstudio-warm.git",
+    "url": "git+https://github.com/diegomarino/lm-studio-warm.git",
     "directory": "packages/opencode"
   },
-  "homepage": "https://github.com/diegomarino/opencode-lmstudio-warm#readme",
+  "homepage": "https://github.com/diegomarino/lm-studio-warm#readme",
   "bugs": {
-    "url": "https://github.com/diegomarino/opencode-lmstudio-warm/issues"
+    "url": "https://github.com/diegomarino/lm-studio-warm/issues"
   },
   "engines": {
     "bun": ">=1.0.0"

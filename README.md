@@ -1,12 +1,52 @@
 # lm-studio-warm
 
 A bun-workspaces monorepo for deterministic LM Studio model pre-warming across
-coding-agent integrations.
+coding-agent integrations. Every package warms a target model — makes sure
+it's already loaded and addressable in LM Studio — before it lets a
+completion request leave, instead of paying an in-flight cold-load latency
+spike or racing a "no model loaded" error.
+
+![Quick start: opt in with a config file, LM Studio starts cold, the first request warms the model before it leaves, and lms ps shows the model resident with no TTL](docs/quickstart.gif)
+
+<sup>Scripted demo (`scripts/generate-quickstart-cast.py`) using the `omp` package — the status/log
+lines are the plugins' real strings; the cold-load wait is shortened. See each package's own README
+for its runtime-specific quick start.</sup>
 
 ## Packages
 
-- [`packages/omp`](packages/omp/README.md) — `omp` extension: warms LM Studio
-  models before every `lm-studio` completion stream.
+| Package | npm name | What it wires into |
+|---|---|---|
+| [`packages/core`](packages/core) | `lm-studio-warm-core` | Runtime-agnostic core: cross-process lock, eviction planning, `lms` CLI client, model discovery, two-tier config loading. Not user-facing on its own. |
+| [`packages/omp`](packages/omp) | `omp-lm-studio-warm` | [`omp`](https://github.com/diegomarino/omp) extension — warms LM Studio models before every `lm-studio` completion stream. |
+| [`packages/pi`](packages/pi) | `pi-lm-studio-warm` | [`pi`](https://github.com/earendil-works/pi) extension — same gate, wired as a native `lm-studio` provider. |
+| [`packages/opencode`](packages/opencode) | `opencode-lm-studio-warm` | [opencode](https://opencode.ai) plugin — gates every request via the `chat.params` hook; heals mid-session TTL evictions. |
+| [`packages/opencode-pointer`](packages/opencode-pointer) | `opencode-lmstudio-warm` | Compatibility re-export shell for the pre-rename npm name; excluded from automated releases (manual publishes, see [RELEASING.md](RELEASING.md)). |
+
+All four active packages (`core`, `omp`, `pi`, `opencode`) share the same
+`WarmOptions` config shape and the same cross-process lock at
+`~/.cache/lm-studio-warm/lock` — see
+[`packages/core/README.md`](packages/core/README.md) for the canonical
+configuration reference and lock semantics. Each wiring package's own README
+covers its install steps, config file location, and runtime-specific
+behavior.
+
+## Repo map
+
+```
+lm-studio-warm/
+├── package.json                      # private workspace root; no publishable code
+├── tsconfig.base.json · bunfig.toml
+├── release-please-config.json · .release-please-manifest.json
+├── RELEASING.md                      # publish runbook
+├── .github/workflows/                # ci.yml (per-package matrix), release-please.yml
+├── docs/                             # audits/, superpowers specs & plans, shared demo assets
+└── packages/
+    ├── core/              → npm lm-studio-warm-core
+    ├── omp/                → npm omp-lm-studio-warm
+    ├── pi/                 → npm pi-lm-studio-warm
+    ├── opencode/           → npm opencode-lm-studio-warm
+    └── opencode-pointer/   → npm opencode-lmstudio-warm (old name; manual releases only)
+```
 
 ## Development
 
@@ -17,7 +57,21 @@ bun run typecheck
 bun run test
 ```
 
+CI (`.github/workflows/ci.yml`) runs a per-package matrix
+(`bun run --filter './packages/<name>' check` for core, omp, pi, opencode,
+opencode-pointer) plus a `bun audit` job.
+
 See `packages/*/README.md` for package-specific documentation.
 
-> This root README is a stub; it will be expanded with full monorepo
-> documentation in a later task.
+## Releases
+
+Versioning is automated with [release-please](https://github.com/googleapis/release-please)
+in manifest mode, one component per package under `packages/*` (`opencode-pointer`
+excluded — it's released manually). Conventional commits drive per-package
+version bumps; no one edits a version number by hand. See
+[RELEASING.md](RELEASING.md) for the full runbook, including the
+`opencode-pointer` manual-publish process.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
