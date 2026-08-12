@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test"
+import { describe, it, expect, spyOn } from "bun:test"
 import {
   buildDefaults,
   resolveOptions,
@@ -96,6 +96,7 @@ describe("resolveOptions", () => {
     expect(o.ttlSeconds).toBe(0)
     expect(o.eager).toBe(true)
     expect(o.enabled).toBe(true)
+    expect(o.evictMaxVictims).toBe(8)
   })
 
   it("file options override defaults, plugin options override file", () => {
@@ -139,6 +140,13 @@ describe("sanitizeOptions", () => {
     const { opts: o, warnings } = sanitizeOptions(resolveOptions(DEFAULTS, { providers: "lm-studio" as never }, null), DEFAULTS)
     expect(o.providers).toEqual(["lm-studio"])
     expect(warnings).toHaveLength(1)
+  })
+
+  it("rejects providers containing an empty string (distinct from the wrong-type branch above)", () => {
+    const { opts: o, warnings } = sanitizeOptions(resolveOptions(DEFAULTS, { providers: ["lm-studio", ""] }, null), DEFAULTS)
+    expect(o.providers).toEqual(["lm-studio"])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain("providers")
   })
 
   it("resets negative or non-numeric numeric options to their defaults", () => {
@@ -214,6 +222,11 @@ describe("addressable", () => {
     expect(addressable([], "k")).toBe(false)
     expect(addressable(null as never, "k")).toBe(false)
   })
+
+  it("tolerates null/garbage elements within an otherwise valid array without throwing", () => {
+    expect(addressable([null as never, { identifier: "k" }], "k")).toBe(true)
+    expect(addressable([null as never, undefined as never], "k")).toBe(false)
+  })
 })
 
 describe("classifyPs", () => {
@@ -242,6 +255,21 @@ describe("parseLmsJsonArray", () => {
     expect(parseLmsJsonArray("not-json")).toBeNull()
     expect(parseLmsJsonArray("")).toBeNull()
     expect(parseLmsJsonArray('{"x":1}', ["instances"])).toBeNull()
+  })
+
+  it("tolerates surrounding whitespace / CRLF around the payload", () => {
+    expect(parseLmsJsonArray('  \r\n[{"a":1}]\n')).toEqual([{ a: 1 }])
+    expect(parseLmsJsonArray("   ")).toBeNull() // whitespace-only collapses to the empty-output branch
+  })
+
+  it("does not auto-unwrap a wrapper object when unwrapKeys is omitted (default [])", () => {
+    expect(parseLmsJsonArray('{"instances":[{"a":1}]}')).toBeNull()
+  })
+
+  it("returns null for successfully-parsed non-array primitives, including the null literal (typeof null === 'object' trap)", () => {
+    expect(parseLmsJsonArray("42")).toBeNull()
+    expect(parseLmsJsonArray('"hi"')).toBeNull()
+    expect(parseLmsJsonArray("null")).toBeNull()
   })
 })
 
@@ -329,6 +357,11 @@ describe("loadArgs", () => {
       ),
     ).toEqual(["load", "k", "-y", "--ttl", "10"])
   })
+
+  it("a perModel override for a different key does not leak into the target key's args", () => {
+    const o = opts({ parallel: 4, perModel: { other: { parallel: 9 } } })
+    expect(loadArgs(o, "k")).toEqual(["load", "k", "-y", "--parallel", "4"])
+  })
 })
 
 describe("pidAlive / parseLockPid", () => {
@@ -341,6 +374,19 @@ describe("pidAlive / parseLockPid", () => {
     expect(parseLockPid("0")).toBeNull()
     expect(parseLockPid("-3")).toBeNull()
     expect(parseLockPid("nope")).toBeNull()
+  })
+
+  it("treats EPERM (process exists but owned by another user) as alive, not dead", () => {
+    const spy = spyOn(process, "kill").mockImplementation(() => {
+      const e = new Error("operation not permitted") as NodeJS.ErrnoException
+      e.code = "EPERM"
+      throw e
+    })
+    try {
+      expect(pidAlive(1)).toBe(true)
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
 
@@ -393,6 +439,27 @@ describe("eviction pure", () => {
     expect(got).toEqual(["b", "a"])
   })
 
+  it("evictionCandidates: excludes via modelKey-only target match, queued>0 busy, and missing identifier; missing lastUsedTime sorts first", () => {
+    // A suffixed duplicate of the target (different identifier, same modelKey) must still be excluded —
+    // proves the `i.modelKey !== targetKey` arm, not just the `i.identifier !== targetKey` arm.
+    const dup = { identifier: "t:2", modelKey: "t", status: "idle", queued: 0, lastUsedTime: 1, sizeBytes: 1 }
+    expect(evictionCandidates([dup], "t", [])).toEqual([])
+
+    // queued > 0 counts as busy even when status is idle (not just `generating`).
+    const queued: LmsInstance = { identifier: "q", modelKey: "q", status: "idle", queued: 2, lastUsedTime: 1, sizeBytes: 1 }
+    expect(evictionCandidates([queued], "t", [])).toEqual([])
+
+    // An instance without a string identifier is never a candidate.
+    const noId = { modelKey: "x", status: "idle", queued: 0, lastUsedTime: 1, sizeBytes: 1 } as LmsInstance
+    const ok: LmsInstance = { identifier: "ok", modelKey: "ok", status: "idle", queued: 0, lastUsedTime: 1, sizeBytes: 1 }
+    expect(evictionCandidates([noId, ok], "t", []).map((i) => i.identifier)).toEqual(["ok"])
+
+    // A missing lastUsedTime defaults to 0 and therefore sorts first (most evictable).
+    const never: LmsInstance = { identifier: "never", modelKey: "never", status: "idle", queued: 0, sizeBytes: 1 }
+    const oldest: LmsInstance = { identifier: "oldest", modelKey: "oldest", status: "idle", queued: 0, lastUsedTime: 1000, sizeBytes: 1 }
+    expect(evictionCandidates([oldest, never], "t", []).map((i) => i.identifier)).toEqual(["never", "oldest"])
+  })
+
   it("planEviction already-fits / partial / cannot-fit", () => {
     const instances: LmsInstance[] = [
       { identifier: "old", modelKey: "old", status: "idle", queued: 0, lastUsedTime: 1, sizeBytes: 50 },
@@ -432,10 +499,41 @@ describe("eviction pure", () => {
     expect(nofit.victims.length).toBe(2)
   })
 
+  it("planEviction stops evicting as soon as the target fits (does not over-evict)", () => {
+    const big = { identifier: "big", modelKey: "big", status: "idle", queued: 0, lastUsedTime: 1, sizeBytes: 65 }
+    const small = { identifier: "small", modelKey: "small", status: "idle", queued: 0, lastUsedTime: 5, sizeBytes: 16 }
+    const plan = planEviction({
+      instances: [big, small],
+      targetKey: "t",
+      targetSizeBytes: 27,
+      budgetBytes: 100,
+      headroomBytes: 4,
+      protect: [],
+    })
+    // used=81, available=19, needed=31 → evicting `big` alone (LRU first) already covers it; `small` is untouched.
+    expect(plan.victims.map((v) => v.identifier)).toEqual(["big"])
+    expect(plan.fitsAfter).toBe(true)
+  })
+
+  it("planEviction: no eligible candidates (all busy) → empty victims, fitsAfter false", () => {
+    const busy = { identifier: "busy", modelKey: "busy", status: "generating", queued: 0, lastUsedTime: 1, sizeBytes: 65 }
+    const plan = planEviction({
+      instances: [busy],
+      targetKey: "t",
+      targetSizeBytes: 27,
+      budgetBytes: 80,
+      headroomBytes: 4,
+      protect: [],
+    })
+    expect(plan.victims).toEqual([])
+    expect(plan.fitsAfter).toBe(false)
+  })
+
   it("isMemoryPressureError matches guardrail/OOM only", () => {
     expect(isMemoryPressureError("insufficient system resources / memory guardrail")).toBe(true)
     expect(isMemoryPressureError("CUDA OOM")).toBe(true)
     expect(isMemoryPressureError("not enough VRAM")).toBe(true)
+    expect(isMemoryPressureError("Error: out of memory")).toBe(true) // literal "out of memory" branch, distinct from the \boom\b regex above
     expect(isMemoryPressureError("context length exceeds max")).toBe(false)
     expect(isMemoryPressureError("insufficient disk space")).toBe(false)
     expect(isMemoryPressureError("model not found")).toBe(false)
@@ -495,10 +593,14 @@ describe("parseConfigFile", () => {
     expect(warning).toMatch(/parse/i)
   })
 
-  it("warns when top-level is not an object", () => {
-    const { opts, warning } = parseConfigFile("[]", "x.json")
-    expect(opts).toEqual({})
-    expect(warning).toMatch(/object/i)
+  it("warns when top-level is not an object (array, string, null, or number)", () => {
+    // `null` specifically exercises the explicit `parsed === null` guard, since
+    // `typeof null === "object"` would otherwise slip past a naive object check.
+    for (const bad of ["[]", '"str"', "null", "42"]) {
+      const { opts, warning } = parseConfigFile(bad, "x.json")
+      expect(opts).toEqual({})
+      expect(warning).toMatch(/object/i)
+    }
   })
 })
 
