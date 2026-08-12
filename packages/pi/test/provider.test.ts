@@ -205,6 +205,26 @@ describe("activateExtension active path (real pi-ai Provider)", () => {
     expect(readCalls(sb).some((c) => c[0] === "load" && c[1] === "eager-model")).toBe(true)
   })
 
+  it("eager warm honors a configured providers list beyond the lm-studio default", async () => {
+    const sb = makeSandbox()
+    const { handlers } = await activate(sb, { providers: ["custom-lm-provider"] })
+
+    const ctx = makeCtx({
+      model: { id: "custom-eager-model", provider: "custom-lm-provider", baseUrl: "" } as never,
+    })
+    await handlers.session_start?.({ type: "session_start", reason: "startup" }, ctx)
+
+    const deadline = Date.now() + 10_000
+    while (
+      !readCalls(sb).some((c) => c[0] === "load" && c[1] === "custom-eager-model") &&
+      Date.now() < deadline
+    ) {
+      await new Promise((r) => setTimeout(r, 25))
+    }
+
+    expect(readCalls(sb).some((c) => c[0] === "load" && c[1] === "custom-eager-model")).toBe(true)
+  })
+
   it("does not eager-warm a current model belonging to a different provider", async () => {
     const sb = makeSandbox()
     const { handlers } = await activate(sb)

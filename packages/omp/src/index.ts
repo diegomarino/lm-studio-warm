@@ -1,17 +1,9 @@
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent"
 
-import { appendLog, createWarmGate, type ConfigLoadResult } from "lm-studio-warm-core"
+import { appendLog, createWarmGate, summarizeWarnings, type ConfigLoadResult } from "lm-studio-warm-core"
 import { loadConfig } from "./config"
 import { fetchLmStudioWarmModels } from "./discover-adapter"
 import { createGatedStreamFn } from "./stream"
-
-/** One user-facing line for a batch of config warnings; the first names its file. */
-function summarizeWarnings(warnings: string[], logFile: string): string {
-  const headline = warnings.find((w) => w.includes("INACTIVE")) ?? warnings[0] ?? ""
-  const prefixed = headline.startsWith("lm-studio-warm") ? headline : `lm-studio-warm: ${headline}`
-  const rest = warnings.length - 1
-  return `${prefixed}${rest > 0 ? ` (+${rest} more — see ${logFile})` : ""}`
-}
 
 export function activateExtension(
   pi: ExtensionAPI,

@@ -83,7 +83,10 @@ export function createGatedProviderStreams(deps: GatedStreamDeps): ProviderStrea
         }
 
         try {
-          const baseURL = model.baseUrl.startsWith("http") ? model.baseUrl : deps.baseURL
+          const baseURL =
+            typeof model.baseUrl === "string" && model.baseUrl.startsWith("http")
+              ? model.baseUrl
+              : deps.baseURL
           showProgress()
           const result = await deps.warm(model.id, baseURL).finally(clearProgress)
           if (!result.ok && shouldFailRequest(deps.failMode, result)) {

@@ -29,6 +29,7 @@ import {
   resolveOptions,
   sanitizeOptions,
   shouldFailRequest,
+  summarizeWarnings,
   unknownOptionKeys,
   type WarmOptions,
   type WarmResult,
@@ -40,14 +41,6 @@ export { OPENCODE_PROFILE, loadOpencodeConfig } from "./config"
 export type { WarmOptions, WarmResult, LmsInstance, PerModel } from "lm-studio-warm-core"
 
 const OK: WarmResult = { ok: true, confirmed: false, reason: "" }
-
-/** One user-facing line for a batch of config warnings; the first names its file. */
-function summarizeWarnings(warnings: string[], logFile: string): string {
-  const headline = warnings.find((w) => w.includes("INACTIVE")) ?? warnings[0] ?? ""
-  const prefixed = headline.startsWith("lm-studio-warm") ? headline : `lm-studio-warm: ${headline}`
-  const rest = warnings.length - 1
-  return `${prefixed}${rest > 0 ? ` (+${rest} more — see ${logFile})` : ""}`
-}
 
 /** Hooks with no gating — returned on every inactive path so opencode loads cleanly. */
 const INACTIVE_HOOKS = {}

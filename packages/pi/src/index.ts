@@ -1,18 +1,10 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent"
 import { createProvider } from "@earendil-works/pi-ai"
 
-import { appendLog, createWarmGate, fetchLmStudioModels } from "lm-studio-warm-core"
+import { appendLog, createWarmGate, fetchLmStudioModels, summarizeWarnings } from "lm-studio-warm-core"
 import { loadPiConfig } from "./config"
 import { toPiModels } from "./models"
 import { createGatedProviderStreams } from "./stream"
-
-/** One user-facing line for a batch of config warnings; the first names its file. */
-function summarizeWarnings(warnings: string[], logFile: string): string {
-  const headline = warnings.find((w) => w.includes("INACTIVE")) ?? warnings[0] ?? ""
-  const prefixed = headline.startsWith("lm-studio-warm") ? headline : `lm-studio-warm: ${headline}`
-  const rest = warnings.length - 1
-  return `${prefixed}${rest > 0 ? ` (+${rest} more — see ${logFile})` : ""}`
-}
 
 export async function activateExtension(pi: ExtensionAPI, load: typeof loadPiConfig = loadPiConfig): Promise<void> {
   const loaded = load()
@@ -104,8 +96,10 @@ export async function activateExtension(pi: ExtensionAPI, load: typeof loadPiCon
       // Stock pi has no smol/secondary role — only the current model can be
       // eagerly warmed (Spec adaptation note 3).
       const m = ctx.model
-      if (m && m.provider === "lm-studio") {
-        void gate.warm(m.id, m.baseUrl?.startsWith("http") ? m.baseUrl : opts.baseURL)
+      if (m && opts.providers.includes(m.provider)) {
+        const baseURL = m.baseUrl?.startsWith("http") ? m.baseUrl : opts.baseURL
+        appendLog(opts.logFile, `eager warm queued for ${m.id}`)
+        void gate.warm(m.id, baseURL)
       }
     }
   })
