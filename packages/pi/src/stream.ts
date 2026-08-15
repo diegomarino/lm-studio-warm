@@ -5,11 +5,52 @@ import {
   type Context,
   type Model,
   type ProviderStreams,
+  type SimpleStreamOptions,
   type StreamOptions,
 } from "@earendil-works/pi-ai"
-import { stream as openAIStream, streamSimple as openAIStreamSimple } from "@earendil-works/pi-ai/api/openai-completions"
 
 import { appendLog, shouldFailRequest, type WarmOptions, type WarmResult } from "lm-studio-warm-core"
+
+type InnerStream = (
+  model: Model<"openai-completions">,
+  context: Context,
+  options?: StreamOptions,
+) => AssistantMessageEventStream
+type InnerStreamSimple = (
+  model: Model<"openai-completions">,
+  context: Context,
+  options?: SimpleStreamOptions,
+) => AssistantMessageEventStream
+type InnerStreams = { stream: InnerStream; streamSimple: InnerStreamSimple }
+
+let innerStreamsPromise: Promise<InnerStreams> | null = null
+
+/**
+ * Resolve the real openai-completions implementation. Under bun/node the
+ * package's `./api/*` subpath export resolves directly; under pi's extension
+ * runtime the package specifier is aliased to pi-ai's compat surface, where
+ * subpath specifiers do not resolve — there, fall back to the legacy aliases
+ * the compat surface re-exports.
+ */
+function loadInnerStreams(): Promise<InnerStreams> {
+  innerStreamsPromise ??= import("@earendil-works/pi-ai/api/openai-completions")
+    .then((m) => ({ stream: m.stream as InnerStream, streamSimple: m.streamSimple as InnerStreamSimple }))
+    .catch(async () => {
+      const compat = (await import("@earendil-works/pi-ai")) as Partial<{
+        streamOpenAICompletions: InnerStream
+        streamSimpleOpenAICompletions: InnerStreamSimple
+      }>
+      const stream = compat.streamOpenAICompletions
+      const streamSimple = compat.streamSimpleOpenAICompletions
+      if (!stream || !streamSimple) {
+        throw new Error(
+          "lm-studio-warm: cannot resolve pi-ai openai-completions streams (neither the ./api subpath export nor the compat legacy aliases are available)",
+        )
+      }
+      return { stream, streamSimple }
+    })
+  return innerStreamsPromise
+}
 
 /** Minimal slice of the host's ExtensionUIContext the gate needs for progress. */
 export type GatedStreamUi = {
@@ -26,8 +67,8 @@ export type GatedStreamDeps = {
   /** Session UI accessor (null when no UI is available yet). */
   getUi?: () => GatedStreamUi | null
   /** Test seams — default to the real openai-completions API implementation. */
-  innerStream?: typeof openAIStream
-  innerStreamSimple?: typeof openAIStreamSimple
+  innerStream?: InnerStream
+  innerStreamSimple?: InnerStreamSimple
 }
 
 /** Hand-built terminal AssistantMessage for a warm failure — pi-ai has no error-message helper. */
@@ -59,7 +100,9 @@ function warmFailureMessage(model: Model<"openai-completions">, text: string): A
  */
 export function createGatedProviderStreams(deps: GatedStreamDeps): ProviderStreams {
   const gate = <TOpts extends StreamOptions>(
-    inner: (model: Model<"openai-completions">, context: Context, options?: TOpts) => AssistantMessageEventStream,
+    resolveInner: () => Promise<
+      (model: Model<"openai-completions">, context: Context, options?: TOpts) => AssistantMessageEventStream
+    >,
   ) =>
     (model: Model<"openai-completions">, context: Context, options?: TOpts): AssistantMessageEventStream => {
       const outer = createAssistantMessageEventStream()
@@ -101,6 +144,9 @@ export function createGatedProviderStreams(deps: GatedStreamDeps): ProviderStrea
             return
           }
 
+          // Resolved only after the gate opens so a resolution failure surfaces
+          // as a terminal error event, never as a module-load crash.
+          const inner = await resolveInner()
           for await (const event of inner(model, context, options)) outer.push(event)
         } catch (err) {
           const aborted = options?.signal?.aborted === true
@@ -118,7 +164,7 @@ export function createGatedProviderStreams(deps: GatedStreamDeps): ProviderStrea
     }
 
   return {
-    stream: gate(deps.innerStream ?? openAIStream),
-    streamSimple: gate(deps.innerStreamSimple ?? openAIStreamSimple),
+    stream: gate(async () => deps.innerStream ?? (await loadInnerStreams()).stream),
+    streamSimple: gate(async () => deps.innerStreamSimple ?? (await loadInnerStreams()).streamSimple),
   }
 }
