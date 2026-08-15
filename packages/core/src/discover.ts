@@ -106,7 +106,9 @@ export async function fetchLmStudioModels(
     // convention. Without this, an embedding model shows up in chat pickers
     // advertised at DEFAULT_CONTEXT and 400s on selection. A model the native
     // endpoint POSITIVELY typed as llm/vlm is never name-filtered.
-    if (info === undefined && /(^|[-_/])embed(ding)?s?([-_.]|$)/i.test(id)) continue
+    // "embedding" needs no trailing separator (catches "embeddinggemma"); the
+    // bare "embed(s)" form does, so ids like "bedded-insight" survive.
+    if (info === undefined && /(^|[-_/])(embedding|embeds?([-_.]|$))/i.test(id)) continue
 
     const contextWindow = info?.max_context_length ?? DEFAULT_CONTEXT
     out.push({

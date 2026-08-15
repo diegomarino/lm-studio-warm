@@ -938,6 +938,10 @@ describe("fetchLmStudioModels", () => {
           data: [
             { id: "text-embedding-nomic-embed-text-v1.5" },
             { id: "nomic-embed-text" },
+            // "embedding" concatenated with the family name — no separator
+            // after it; the naive boundary-only regex missed these (audit X3).
+            { id: "embeddinggemma-300m" },
+            { id: "google/embeddinggemma-300m" },
             { id: "qwen3-8b" },
             { id: "bedded-insight-4b" },
           ],
