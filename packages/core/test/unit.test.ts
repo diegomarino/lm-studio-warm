@@ -338,6 +338,26 @@ describe("createLmsClient", () => {
     const client = createLmsClient("lms", run)
     await expect(client.lsModels()).resolves.toEqual([{ modelKey: "k", sizeBytes: 12 }])
   })
+
+  it("ENOENT remedy names the runtime's own config file via configHint (F9)", async () => {
+    const enoentRun: Runner = async () => ({
+      ok: false,
+      timedOut: false,
+      stdout: "",
+      stderr: "",
+      errorCode: "ENOENT",
+      errorMessage: "spawn lms ENOENT",
+    })
+    // Default hint: the YAML name omp/pi probe.
+    const yamlClient = createLmsClient("lms", enoentRun)
+    await yamlClient.lms(["ps", "--json"], 1000)
+    expect(yamlClient.lastRunError()?.message).toContain("set lmsPath in lm-studio-warm.yml")
+    // opencode-style hint: the JSON name its loader actually reads.
+    const jsonClient = createLmsClient("lms", enoentRun, () => {}, "lm-studio-warm.json")
+    await jsonClient.lms(["ps", "--json"], 1000)
+    expect(jsonClient.lastRunError()?.message).toContain("set lmsPath in lm-studio-warm.json")
+    expect(jsonClient.lastRunError()?.message).not.toContain("lm-studio-warm.yml")
+  })
 })
 
 
@@ -554,6 +574,16 @@ describe("eviction pure", () => {
     expect(isMemoryPressureError("context length exceeds max")).toBe(false)
     expect(isMemoryPressureError("insufficient disk space")).toBe(false)
     expect(isMemoryPressureError("model not found")).toBe(false)
+  })
+
+  it("matches LM Studio's real guardrail stderr verbatim (Q8 capture, live E2E 2026-08-13)", () => {
+    // Captured from `lms load` refusing a 35GB model with ~76GB already resident
+    // on a 128GB machine. Note "insufficient system resources" alone would NOT
+    // match the insufficient+memory pattern — the "guardrail" substring is the
+    // load-bearing branch for LM Studio's real wording.
+    const real =
+      "Error: Model loading was stopped due to insufficient system resources. Continuing to load the model would likely overload your system and cause it to freeze. If you think this is incorrect, you can adjust the model loading guardrails in settings."
+    expect(isMemoryPressureError(real)).toBe(true)
   })
 })
 describe("configCandidatePaths", () => {
@@ -811,11 +841,44 @@ describe("loadConfigFrom two-tier safety", () => {
 })
 
 describe("fetchLmStudioModels", () => {
-  it("returns [] on HTTP failure", async () => {
+  it("rejects on HTTP failure — a down server must not read as an authoritative empty catalog (F7)", async () => {
     const fetchImpl = async () => new Response("nope", { status: 500 })
     await expect(
       fetchLmStudioModels("http://127.0.0.1:9/v1", undefined, fetchImpl as unknown as typeof fetch),
-    ).resolves.toEqual([])
+    ).rejects.toThrow("HTTP 500")
+  })
+
+  it("rejects on transport failure (connection refused), engaging the host's stale-cache fallback (F7)", async () => {
+    const fetchImpl = async () => {
+      throw new Error("connect ECONNREFUSED 127.0.0.1:9")
+    }
+    await expect(
+      fetchLmStudioModels("http://127.0.0.1:9/v1", undefined, fetchImpl as unknown as typeof fetch),
+    ).rejects.toThrow("ECONNREFUSED")
+  })
+
+  it("rejects a 200 response without a data array (schema drift is not an empty catalog) (F7)", async () => {
+    const fetchImpl = (async (url: unknown) => {
+      if (String(url).endsWith("/api/v0/models")) return new Response("nope", { status: 404 })
+      return new Response(JSON.stringify({ models: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    }) as typeof fetch
+    await expect(fetchLmStudioModels("http://127.0.0.1:1234/v1", undefined, fetchImpl)).rejects.toThrow(
+      "without a data array",
+    )
+  })
+
+  it("resolves [] only for a genuinely empty data array (F7)", async () => {
+    const fetchImpl = (async (url: unknown) => {
+      if (String(url).endsWith("/api/v0/models")) return new Response("nope", { status: 404 })
+      return new Response(JSON.stringify({ data: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    }) as typeof fetch
+    await expect(fetchLmStudioModels("http://127.0.0.1:1234/v1", undefined, fetchImpl)).resolves.toEqual([])
   })
 
   it("enriches from native /api/v0/models: vision models get vision=true, small models keep native context", async () => {
@@ -865,6 +928,43 @@ describe("fetchLmStudioModels", () => {
     const models = await fetchLmStudioModels("http://127.0.0.1:1234/v1", undefined, fetchImpl)
     expect(models).toHaveLength(1)
     expect(models[0]).toMatchObject({ id: "qwen3", contextWindow: 131_072, vision: false })
+  })
+
+  it("degraded path (no native endpoint): embedding-named models are filtered by naming convention (F18)", async () => {
+    const fetchImpl = (async (url: unknown) => {
+      if (String(url).endsWith("/api/v0/models")) return new Response("nope", { status: 404 })
+      return new Response(
+        JSON.stringify({
+          data: [
+            { id: "text-embedding-nomic-embed-text-v1.5" },
+            { id: "nomic-embed-text" },
+            { id: "qwen3-8b" },
+            { id: "bedded-insight-4b" },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )
+    }) as typeof fetch
+    const models = await fetchLmStudioModels("http://127.0.0.1:1234/v1", undefined, fetchImpl)
+    // embedding-named ids dropped; ordinary ids kept (incl. ones merely containing "bed")
+    expect(models.map((m) => m.id)).toEqual(["qwen3-8b", "bedded-insight-4b"])
+  })
+
+  it("native metadata overrides the name filter: a model typed llm is kept even with 'embed' in its name (F18)", async () => {
+    const fetchImpl = (async (url: unknown) => {
+      if (String(url).endsWith("/api/v0/models")) {
+        return new Response(JSON.stringify({ data: [{ id: "embed-chat-hybrid", type: "llm", max_context_length: 4096 }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      return new Response(JSON.stringify({ data: [{ id: "embed-chat-hybrid" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    }) as typeof fetch
+    const models = await fetchLmStudioModels("http://127.0.0.1:1234/v1", undefined, fetchImpl)
+    expect(models.map((m) => m.id)).toEqual(["embed-chat-hybrid"])
   })
 
   it("rejects ids that could parse as lms flags or contain unsafe characters", async () => {

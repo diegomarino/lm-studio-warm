@@ -65,44 +65,57 @@ export async function fetchLmStudioModels(
     headers.Authorization = `Bearer ${apiKey}`
   }
 
-  try {
-    const [res, native] = await Promise.all([
-      fetchImpl(`${root}/models`, {
-        method: "GET",
-        headers,
-        signal: AbortSignal.timeout(10_000),
-      }),
-      fetchNativeMetadata(root, headers, fetchImpl),
-    ])
+  // Transport and HTTP failures REJECT rather than resolving to []: hosts
+  // (omp's model manager in particular) treat a resolved empty array as an
+  // authoritative "the catalog is empty" and prune cached models, while a
+  // rejection engages their stale-cache/retry fallback. Only a genuinely
+  // empty `data` array may return []. (Native-metadata failures stay soft —
+  // fetchNativeMetadata catches internally and degrades to constants.)
+  const [res, native] = await Promise.all([
+    fetchImpl(`${root}/models`, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(10_000),
+    }),
+    fetchNativeMetadata(root, headers, fetchImpl),
+  ])
 
-    if (!res.ok) return []
-
-    const body: unknown = await res.json()
-    const data =
-      body && typeof body === "object" && Array.isArray((body as { data?: unknown }).data)
-        ? ((body as { data: unknown[] }).data)
-        : []
-
-    const out: WarmModelRecord[] = []
-    for (const entry of data) {
-      if (!entry || typeof entry !== "object") continue
-      const id = (entry as { id?: unknown }).id
-      if (typeof id !== "string" || id.length === 0 || !SAFE_MODEL_ID.test(id)) continue
-
-      const info = native.get(id)
-      if (info?.type === "embedding" || info?.type === "embeddings") continue
-
-      const contextWindow = info?.max_context_length ?? DEFAULT_CONTEXT
-      out.push({
-        id,
-        contextWindow,
-        maxTokens: Math.min(DEFAULT_MAX_TOKENS, contextWindow),
-        vision: info?.type === "vlm",
-      })
-    }
-
-    return out
-  } catch {
-    return []
+  if (!res.ok) {
+    throw new Error(`lm-studio-warm model discovery failed: GET ${root}/models -> HTTP ${res.status}`)
   }
+
+  const body: unknown = await res.json()
+  // A 200 whose body lacks a `data` array is schema drift (proxy, wrong
+  // server), not an empty catalog — reject it like any other failure so hosts
+  // never prune their cached models on a malformed response.
+  if (!body || typeof body !== "object" || !Array.isArray((body as { data?: unknown }).data)) {
+    throw new Error(`lm-studio-warm model discovery failed: GET ${root}/models returned 200 without a data array`)
+  }
+  const data = (body as { data: unknown[] }).data
+
+  const out: WarmModelRecord[] = []
+  for (const entry of data) {
+    if (!entry || typeof entry !== "object") continue
+    const id = (entry as { id?: unknown }).id
+    if (typeof id !== "string" || id.length === 0 || !SAFE_MODEL_ID.test(id)) continue
+
+    const info = native.get(id)
+    if (info?.type === "embedding" || info?.type === "embeddings") continue
+    // Degraded path (no native metadata — older LM Studio or a proxy): the
+    // type-based embedding filter above cannot run, so fall back to naming
+    // convention. Without this, an embedding model shows up in chat pickers
+    // advertised at DEFAULT_CONTEXT and 400s on selection. A model the native
+    // endpoint POSITIVELY typed as llm/vlm is never name-filtered.
+    if (info === undefined && /(^|[-_/])embed(ding)?s?([-_.]|$)/i.test(id)) continue
+
+    const contextWindow = info?.max_context_length ?? DEFAULT_CONTEXT
+    out.push({
+      id,
+      contextWindow,
+      maxTokens: Math.min(DEFAULT_MAX_TOKENS, contextWindow),
+      vision: info?.type === "vlm",
+    })
+  }
+
+  return out
 }

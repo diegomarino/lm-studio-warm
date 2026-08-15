@@ -42,9 +42,9 @@ export function createExecRunner(env: NodeJS.ProcessEnv = process.env): Runner {
 export type LmsExecError = { code?: string; message: string }
 
 /** One log line per failure, naming the true cause even when stderr is empty. */
-function describeFailure(res: RunResult, lmsPath: string): string {
+function describeFailure(res: RunResult, lmsPath: string, configHint: string): string {
   if (res.errorCode === "ENOENT") {
-    return `lms binary not found at "${lmsPath}" — install the LM Studio CLI (lms) or set lmsPath in lm-studio-warm.yml`
+    return `lms binary not found at "${lmsPath}" — install the LM Studio CLI (lms) or set lmsPath in ${configHint}`
   }
   const detail = res.stderr.trim().slice(0, 300) || res.errorMessage?.slice(0, 300) || "no diagnostic output"
   return detail
@@ -54,19 +54,22 @@ export function createLmsClient(
   lmsPath: string,
   run: Runner,
   log: (msg: string) => void = () => {},
+  // Remedies must name the config file the RUNTIME actually reads — opencode
+  // probes only JSON names, so its profile passes "lm-studio-warm.json" here.
+  configHint: string = "lm-studio-warm.yml",
 ) {
   let lastError: LmsExecError | null = null
 
   const lms = async (args: string[], timeoutMs: number) => {
     const res = await run(lmsPath, args, timeoutMs)
-    lastError = res.ok ? null : { code: res.errorCode, message: describeFailure(res, lmsPath) }
+    lastError = res.ok ? null : { code: res.errorCode, message: describeFailure(res, lmsPath, configHint) }
     return res
   }
 
   async function psInstances(): Promise<LmsInstance[] | null> {
     const res = await lms(["ps", "--json"], 15_000)
     if (!res.ok) {
-      log(`lms ps failed: ${describeFailure(res, lmsPath)}`)
+      log(`lms ps failed: ${describeFailure(res, lmsPath, configHint)}`)
       return null
     }
 
@@ -83,7 +86,7 @@ export function createLmsClient(
   > {
     const res = await lms(["ls", "--json"], 15_000)
     if (!res.ok) {
-      log(`lms ls failed: ${describeFailure(res, lmsPath)}`)
+      log(`lms ls failed: ${describeFailure(res, lmsPath, configHint)}`)
       return null
     }
 

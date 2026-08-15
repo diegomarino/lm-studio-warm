@@ -35,6 +35,11 @@ export type WarmGateDeps = {
   openApp?: (args: string[], timeoutMs: number) => Promise<RunResult>
   /** User-visible notice channel (e.g. ctx.ui.notify); log-only when absent. */
   notify?: (message: string, type?: "info" | "warning" | "error") => void
+  /**
+   * Config filename remedies should name (e.g. "lm-studio-warm.json" for
+   * opencode). Defaults to the YAML name omp/pi probe.
+   */
+  configHint?: string
 }
 
 // One process-wide exit hook over a registry of live gates: repeated
@@ -91,7 +96,7 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
 
   let holdingLock = false
 
-  const lms = createLmsClient(opts.lmsPath, run, log)
+  const lms = createLmsClient(opts.lmsPath, run, log, deps.configHint)
 
   try {
     fs.mkdirSync(path.dirname(opts.logFile), { recursive: true })
