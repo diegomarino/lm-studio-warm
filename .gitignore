@@ -8,6 +8,9 @@ coverage/
 # scratch recordings (the shipped demo cast docs/demo-lm-studio-warm.cast IS tracked)
 demo-test.cast
 
+# opencode runtime state the live e2e can leave behind (change audit X4)
+.auto-update-history.json
+
 # repo-level state (main): linked worktrees and agent session dirs
 .worktrees/
 .superpowers/

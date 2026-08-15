@@ -5,7 +5,9 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { spawnSync } from "node:child_process"
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
+// The demo exercises the omp package; since the monorepo restructure its
+// sources live under packages/omp, so every child command runs from there.
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "packages", "omp")
 
 const cyan = (s: string) => `\x1b[36m${s}\x1b[0m`
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`

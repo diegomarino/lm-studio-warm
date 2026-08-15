@@ -6,7 +6,7 @@
   "workspaces": ["packages/*"],
   "engines": { "bun": ">=1.0.0" },
   "scripts": {
-    "check": "bun run --filter './packages/*' check",
+    "check": "bun run --filter './packages/*' check && bun run ./scripts/demo-console.ts",
     "test": "bun run --filter './packages/*' test",
     "typecheck": "bun run --filter './packages/*' typecheck",
     "demo:play": "asciinema play docs/demo-lm-studio-warm.cast",

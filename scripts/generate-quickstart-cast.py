@@ -5,10 +5,10 @@ Adapted from opencode-lmstudio-warm's tools/quickstart/generate-cast.py.
 The demo is scripted, not screen-recorded, so it stays reproducible and free
 of machine-specific noise — the plugin-facing lines (status/working message,
 log wording, activation notice) are taken verbatim from the plugin's own
-strings in src/stream.ts, src/index.ts and src/warm-gate.ts, and the `lms`
+strings in packages/omp/src/stream.ts, packages/omp/src/index.ts and packages/core/src/warm-gate.ts, and the `lms`
 output lines from a real macOS/Apple Silicon capture. The ~4.5 s spinner
 stands in for a real multi-second cold model load; unlike opencode, omp's
-status bar really does show this working message (src/stream.ts:55-56) —
+status bar really does show this working message (packages/omp/src/stream.ts) —
 the spinner visualizes it.
 
 Run from the repo root:
@@ -85,9 +85,9 @@ enter()
 
 out(0.8, f"\r\n{GREY}> qwen/qwen3.6-35b-a3b · api lm-studio-warm{RESET}\r\n\r\n")
 # Cold load happens here (real: seconds to minutes, compressed). The working
-# message below is the plugin's real string (src/stream.ts:56); omp shows it
+# message below is the plugin's real string (packages/omp/src/stream.ts); omp shows it
 # in the status area while the gate holds the request. The "loaded ... in 7s"
-# line is the gate's real log wording (src/warm-gate.ts:499).
+# line is the gate's real log wording (packages/core/src/warm-gate.ts).
 SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 for i in range(50):
     out(0.09, f"\r\x1b[2K{GREY}{SPIN[i % 10]} lm-studio-warm: ensuring qwen/qwen3.6-35b-a3b is loaded (a cold load can take minutes){RESET}")
