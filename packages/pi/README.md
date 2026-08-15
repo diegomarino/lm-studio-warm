@@ -27,7 +27,9 @@ This removes in-flight cold-load latency spikes and makes memory-pressure behavi
 > checkout.
 
 ```bash
-# from a local checkout
+# from a local checkout of the monorepo:
+# install workspace deps first — the extension imports lm-studio-warm-core
+bun install
 pi --extension /path/to/packages/pi/src/index.ts
 ```
 
@@ -69,8 +71,9 @@ YAML
 
 - `LM_STUDIO_BASE_URL`: used **only** when the config `baseURL` is still the default; an explicit
   `baseURL` in the config file wins.
-- `LM_STUDIO_API_KEY`: used both during model discovery (`/models`) **and**, once provider
-  registration lands, as the provider `apiKey` sent as a Bearer token on every completion stream.
+- `LM_STUDIO_API_KEY`: used both during model discovery (`/models`) **and** as the provider
+  `apiKey` sent as a Bearer token on every completion stream — set it when your LM Studio server
+  requires a token.
 
 ## Configuration
 
@@ -91,6 +94,24 @@ merges that refresh as an overlay on top of the baseline snapshot rather than re
   `pi` session restarts, because the baseline snapshot entry is never pruned mid-session. Warming a
   removed model will still fail (the gate cannot make a nonexistent model resident); it just stays
   listed as an option until restart.
+
+## Fail mode behavior
+
+- `open`: never block requests based on warm result.
+- `closed`: any warm failure fails the request.
+- `hybrid` *(default)*: confirmed failures fail requests; ambiguous failures fail-open and continue.
+
+After a confirmed failure the verdict is cached for `retryCooldownMs`
+(default 60 s): requests during that window are answered from the cache and
+say so explicitly (`cached failure from Ns ago — no new probe`). To retry
+sooner, wait out the cooldown or restart the session.
+
+## Troubleshooting
+
+Every failure message points at the log (default
+`~/.cache/pi/lm-studio-warm.log`). The failure vocabulary is core-shared
+across all three runtimes — see the canonical symptom → meaning → action table
+in the [core README's Troubleshooting section](../core/README.md#troubleshooting).
 
 ## Logs / lock paths
 

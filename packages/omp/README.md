@@ -28,7 +28,9 @@ This removes in-flight cold-load latency spikes and makes memory-pressure behavi
 > a moving branch).
 
 ```bash
-# from a local checkout of the lm-studio-warm monorepo
+# from a local checkout of the lm-studio-warm monorepo:
+# install workspace deps first — the extension imports lm-studio-warm-core
+bun install
 omp plugin link /path/to/lm-studio-warm/packages/omp
 # or run directly
 omp --extension /path/to/lm-studio-warm/packages/omp/src/index.ts
@@ -164,7 +166,9 @@ stream request ──> createGatedStreamFn
 
 ## Demo (asciinema)
 
-Two demo artifacts ship with the repository:
+Two demo artifacts ship with the repository. All commands in this section run
+**from the repo root of a monorepo checkout** — the `demo:*` scripts live in the
+root `package.json` and are not part of the published package:
 
 **Quick-start cast** — `../../docs/demo-lm-studio-warm.cast` (rendered to
 `../../docs/quickstart.gif` above). A scripted asciicast in the style of `opencode-lmstudio-warm`'s quickstart:
@@ -184,37 +188,37 @@ wrote), and a focused integration test exercises the gated stream. It sandboxes
 its log and lock in a temp directory — it never touches `~/.cache/omp`.
 
 ```bash
+# from the repo root
 bun run ./scripts/demo-console.ts
 ```
 
 ## Troubleshooting
 
 Every failure message points at the log (default
-`~/.cache/omp/lm-studio-warm.log`). What its vocabulary means:
+`~/.cache/omp/lm-studio-warm.log`). The failure vocabulary is core-shared
+across all three runtimes — the canonical symptom → meaning → action table
+lives in the
+[core README's Troubleshooting section](../core/README.md#troubleshooting).
 
-| Symptom (log/UI) | Meaning | Action |
-|---|---|---|
-| `lm-studio-warm is INACTIVE: … could not be parsed` / `enabled is …` | The config file is unusable; the plugin deactivated rather than guess. | Fix the YAML/JSON (use literal `true`/`false` for `enabled`), or delete the file. |
-| `failed to read …` + inactive | Config exists but is unreadable (permissions). | `chmod u+r` the file; check ownership after sudo edits. |
-| `lms binary not found at "…"` | The LM Studio CLI is missing or `lmsPath` is wrong. | Install the `lms` CLI (LM Studio → Developer) or fix `lmsPath`. |
-| `lock contention timeout waiting to warm …` | Another omp process held the warm lock for the whole `lockWaitTimeoutMs`. | Usually just wait/retry; if a lock is truly stuck, remove the `lockDir` directory. |
-| `only suffixed duplicates of <key> are resident (…)` | Only `key:2`-style instances exist and one is busy. | Wait until idle (auto-reconciled), or `lms unload <id>` / unload in the GUI. |
-| `… (cached failure from Ns ago — no new probe; retrying in ~Ns…)` | A recent confirmed failure is being replayed from cache during `retryCooldownMs`. | If you already fixed the cause, wait out the cooldown or restart the session. |
-| `refused for memory` / `guardrail` in a load failure | LM Studio refused the load under RAM pressure. | Enable `evictOnPressure`, raise `evictHeadroomMB`, or unload models manually. |
-| `eviction: reached evictMaxVictims=…` | The eviction cap stopped further unloads. | Raise `evictMaxVictims` (or `0` for unlimited). |
-| `WARNING: baseURL … is not loopback` | The gate manages only the local LM Studio; remote servers cannot be warmed. | Point `baseURL` at the local server, or accept JIT behavior for remote. |
-| `not deleting lock dir …: unexpected entries` | `lockDir` points at a directory with real content — refusing to delete it. | Point `lockDir` at a dedicated path (default `~/.cache/lm-studio-warm/lock`); it should only ever contain `pid` and `deadline`. |
+omp-specific notes:
+
+- Config problems additionally surface as a one-time `ctx.ui.notify` warning
+  at session start (invalid/unreadable configs name the file and the fix).
+- `lock contention timeout` here usually means another omp/pi/opencode
+  session held the shared lock; see the core table for the recovery steps.
 
 ## Development
 
 ```bash
 bun install        # bun >= 1.0
 bun run check      # typecheck (tsc --noEmit) + tests
-bun test           # bun test is the canonical runner (config in bunfig.toml)
+bun run test       # bun test is the canonical runner (the 30 s timeout lives in this script's flag)
 ```
 
-Vitest was removed deliberately: `bun test` is the single runner, and its
-timeout budget lives in `bunfig.toml`. Tests are hermetic — they must never
+Vitest was removed deliberately: `bun test` is the single runner. The 30 s
+timeout budget lives in each package's `test` script flag (`--timeout 30000`) —
+the root `bunfig.toml` is only picked up for root-cwd runs, so bare `bun test`
+inside a package would get bun's 5 s default. Tests are hermetic — they must never
 read or write real `$HOME` state (CI-style check: run `bun test` with a scratch
 `HOME` and assert no `~/.cache/omp` appears there).
 

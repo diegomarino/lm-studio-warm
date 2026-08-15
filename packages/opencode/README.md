@@ -26,13 +26,24 @@ Per request, the plugin verifies the model is actually loaded and, only when it
 isn't, performs that single `lms load` before letting the request through.
 
 Verified against opencode **v1.17.10** and **LM Studio 0.4.18** (`lms` CLI
-commit `6041ae0`) on macOS/Apple Silicon (see
-[`test/e2e/verify.sh`](./test/e2e/verify.sh), 9/9 passing). The LM Studio
+commit `6041ae0`) on macOS/Apple Silicon, and re-verified on this tree against
+opencode **v1.18.0** (2026-08-13, 9/9 — see
+[`test/e2e/verify.sh`](./test/e2e/verify.sh)). The LM Studio
 behaviors the plugin depends on are the `lms ps --json` field names
 (`modelKey` / `identifier` / `status` / `queued`) and the fact that
 `lms load` is not idempotent.
 
 ## Quick start
+
+> **Not published yet.** `opencode-lm-studio-warm` is not on npm yet (the
+> published predecessor is the legacy `opencode-lmstudio-warm`); the npm
+> commands below will work once the rename release ships. Until then, install
+> from a local checkout of this monorepo: run `bun install` at its root, then
+> use the [plugin-file re-export](#plugin-file-re-export) pattern pointing at
+> the checkout — e.g. `~/.config/opencode/plugin/lm-studio-warm.ts` containing
+> `export { LMStudioWarm } from "/path/to/lm-studio-warm/packages/opencode/src/index"`.
+> (Use the NAMED re-export: opencode ≥1.18's plugin loader does not enumerate
+> `export * from` re-exports — verified live on 1.18.0.)
 
 **1. Install and register the plugin** — one command; opencode resolves it from
 npm and adds it to your config's `plugin` array:
@@ -123,8 +134,13 @@ array, drop a one-line re-export where opencode's plugin auto-discovery looks:
 // ~/.config/opencode/plugin/lm-studio-warm.ts (global — every session on the
 // machine) or .opencode/plugin/lm-studio-warm.ts (project-local — this
 // project only)
-export * from "opencode-lm-studio-warm"
+export { LMStudioWarm } from "opencode-lm-studio-warm"
 ```
+
+> Use the NAMED re-export, not `export * from ...`: opencode ≥1.18's plugin
+> loader does not enumerate star re-exports, so a `export *` plugin file loads
+> as an empty module and the plugin silently never activates (verified live on
+> 1.18.0; `export *` worked on 1.17.x).
 
 Auto-discovered from either location — no `plugin` array entry needed.
 (opencode's docs spell this directory `plugins`; verified as `plugin/` —
@@ -149,7 +165,10 @@ The plugin works with zero configuration. Optional tuning lives in
 `~/.config/opencode/lm-studio-warm.json` (the legacy `lmstudio-warm.json`
 filename is still read for backward compatibility), or inline as
 `"plugin": [["opencode-lm-studio-warm", {...}]]`. Set `"enabled": false` in the
-JSON file to turn the gate off without uninstalling.
+JSON file to turn the gate off without uninstalling. Config discovery follows
+the opencode binary's own rule: when `XDG_CONFIG_HOME` is set,
+`$XDG_CONFIG_HOME/opencode/` is probed first, with the literal
+`~/.config/opencode/` as fallback.
 
 > **Scope:** the plugin manages the **local** LM Studio through the `lms` CLI.
 > `baseURL` (and any gated provider's `baseURL`) must point at this same
@@ -351,6 +370,11 @@ it is not required.
 
 ## Known limitations / failure modes
 
+When a request fails with an `lm-studio-warm:` error, the log at
+`~/.cache/opencode/lm-studio-warm.log` has the detail — the canonical
+symptom → meaning → action decoder for that vocabulary lives in the
+[core README's Troubleshooting section](../core/README.md#troubleshooting).
+
 - **30 s verified-cache window**: an external unload (GUI, crash) within 30 s
   of a positive check can slip one request through; it errors visibly and the
   next request heals. There is no error hook in v1.17.10 to invalidate the
@@ -404,8 +428,8 @@ bun run --filter './packages/opencode' e2e          # live E2E fixture (needs LM
 ```
 
 The pure logic (config merge, model-ref parsing, load-arg building,
-addressability, pid liveness, fail-mode decisions) is unit-tested against core
-under `test/unit.test.ts`; the plugin's stateful behavior (warm gate, lock,
+addressability, pid liveness, fail-mode decisions) is unit-tested in core's
+suite (`packages/core/test/unit.test.ts`); the plugin's stateful behavior (warm gate, lock,
 reconciliation, eviction, the `chat.params` gate) is covered by
 `test/integration.test.ts`, and the live system behavior by the E2E fixture
 under [`test/e2e/`](./test/e2e/).

@@ -47,7 +47,7 @@ below for why.
 | Option | Type | Tier | Default | Description |
 |---|---|---|---|---|
 | `enabled` | boolean | identity | `true` | Global kill switch. Must be a literal boolean — see [Two-tier config handling](#two-tier-config-handling). |
-| `providers` | string[] | tuning | *(per profile — see above)* | Only matching provider IDs get warm-gated. |
+| `providers` | string[] | tuning | *(per profile — see above)* | Per-runtime semantics differ: on **opencode**, only matching provider IDs get warm-gated per request. On **omp/pi**, the list filters the *eager warm only* — request gating always follows the one registered `lm-studio` provider, regardless of this list. |
 | `lmsPath` | string | tuning | `~/.lmstudio/bin/lms` (if it exists) else `lms` | `lms` executable path. |
 | `baseURL` | string | tuning | `http://127.0.0.1:1234/v1` | LM Studio HTTP base URL for checks/streams. Must be loopback (non-loopback logs a warning; the gate cannot manage a remote server). |
 | `ttlSeconds` | number | tuning | `0` | Default `lms load --ttl` (`0` omits the flag — resident until unloaded). |
@@ -102,6 +102,26 @@ workers. Keep eviction-related settings (`ramBudgetMB`, `evictHeadroomMB`, `evic
 `evictMaxVictims`) consistent across every runtime you run concurrently against the same LM Studio
 instance; tracking real cross-runtime ownership is future work (see the monorepo design spec,
 §Shared lock).
+
+## Troubleshooting
+
+This table is the canonical decoder for the failure vocabulary core emits on
+**every** runtime (omp, pi, opencode). Every failure message points at the
+runtime's log file (`~/.cache/{omp,pi,opencode}/lm-studio-warm.log` by
+default). Wiring READMEs add only host-specific notes and link back here.
+
+| Symptom (log/UI) | Meaning | Action |
+|---|---|---|
+| `lm-studio-warm is INACTIVE: … could not be parsed` / `enabled is …` | The config file is unusable; the plugin deactivated rather than guess. | Fix the YAML/JSON (use literal `true`/`false` for `enabled`), or delete the file. |
+| `failed to read …` + inactive | Config exists but is unreadable (permissions). | `chmod u+r` the file; check ownership after sudo edits. |
+| `lms binary not found at "…"` | The LM Studio CLI is missing or `lmsPath` is wrong. | Install the `lms` CLI (LM Studio → Developer) or fix `lmsPath` in your runtime's config file. |
+| `lock contention timeout waiting to warm …` | Another process held the shared warm lock for the whole `lockWaitTimeoutMs`. | Usually just wait/retry; if a lock is truly stuck, remove the `lockDir` directory. |
+| `only suffixed duplicates of <key> are resident (…)` | Only `key:2`-style instances exist and one is busy. | Wait until idle (auto-reconciled), or `lms unload <id>` / unload in the GUI. |
+| `… (cached failure from Ns ago — no new probe; retrying in ~Ns…)` | A recent confirmed failure is being replayed from cache during `retryCooldownMs`. | If you already fixed the cause, wait out the cooldown or restart the session. |
+| `refused for memory` / `guardrail` in a load failure | LM Studio refused the load under RAM pressure. | Enable `evictOnPressure`, raise `evictHeadroomMB`, or unload models manually. |
+| `eviction: reached evictMaxVictims=…` | The eviction cap stopped further unloads. | Raise `evictMaxVictims` (or `0` for unlimited). |
+| `WARNING: baseURL … is not loopback` | The gate manages only the local LM Studio; remote servers cannot be warmed. | Point `baseURL` at the local server, or accept JIT behavior for remote. |
+| `not deleting lock dir …: unexpected entries` | `lockDir` points at a directory with real content — refusing to delete it. | Point `lockDir` at a dedicated path (default `~/.cache/lm-studio-warm/lock`); it should only ever contain `pid` and `deadline`. |
 
 ## Development
 
