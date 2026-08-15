@@ -18,8 +18,24 @@ set -uo pipefail
 LMS="${LMS:-$HOME/.lmstudio/bin/lms}"
 MAIN="${MAIN:-your-main-model-key}"
 SMALL="${SMALL:-your-small-model-key}"
-LOG="$HOME/.cache/opencode/lmstudio-warm.log"
+LOG="$HOME/.cache/opencode/lm-studio-warm.log"
 cd "$(dirname "$0")" || exit 1
+
+# Isolate from the user's global opencode config: a globally installed
+# lmstudio-warm plugin (e.g. the published old-name package) would race the
+# fixture plugin and mask every assertion below (observed live 2026-08-13:
+# 3/9 with contamination, 9/9 isolated). Opt out with E2E_NO_ISOLATION=1.
+if [ "${E2E_NO_ISOLATION:-0}" != "1" ]; then
+  XDG_CONFIG_HOME="$(mktemp -d "${TMPDIR:-/tmp}/lmsw-e2e-xdg.XXXXXX")"
+  export XDG_CONFIG_HOME
+  trap 'rm -rf "$XDG_CONFIG_HOME"' EXIT
+  # The plugin's config loader keeps the literal ~/.config/opencode as a
+  # fallback when $XDG_CONFIG_HOME/opencode holds no config, so an empty XDG
+  # dir alone still leaks the user's real lm-studio-warm tuning into the run
+  # (change audit X1). Plant a neutral config so the first probe wins.
+  mkdir -p "$XDG_CONFIG_HOME/opencode"
+  printf '{}\n' > "$XDG_CONFIG_HOME/opencode/lm-studio-warm.json"
+fi
 
 case "$MAIN$SMALL" in
   *your-*-model-key*) echo "Set MAIN and SMALL to two real LM Studio model keys (see ./README.md)" >&2; exit 2 ;;

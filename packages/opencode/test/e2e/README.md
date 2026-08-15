@@ -48,7 +48,8 @@ Other overridable vars: `LMS` (path to the `lms` CLI, default
 
 ## How to run
 
-From the repo root:
+From `packages/opencode` (or via `bun run --filter './packages/opencode' e2e`
+at the repo root — the `e2e` script lives in this package, not the root):
 
 ```bash
 bun run e2e                       # = test/e2e/verify.sh
@@ -57,7 +58,7 @@ MAIN="…" SMALL="…" ./test/e2e/verify.sh
 ```
 
 Exit code is the number of failed checks (0 = all passed). The plugin's own log
-is at `~/.cache/opencode/lmstudio-warm.log`.
+is at `~/.cache/opencode/lm-studio-warm.log`.
 
 ## What it checks
 
