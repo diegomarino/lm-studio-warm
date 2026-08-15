@@ -3,8 +3,9 @@
 ## [0.2.3](https://github.com/diegomarino/opencode-lmstudio-warm/compare/v0.2.2...v0.2.3) (2026-08-05)
 
 Published from the pre-monorepo repository; its changes were carried into this
-repo by the subtree import (e.g. `7ec1f48` and `4020ae5` appear in this repo's
-history verbatim).
+repo by the subtree import (the commits linked below live in this repo's
+history as `694f1e6` and `fbfd7ed`; SHAs differ from the links because the
+imported history went through a pre-publication scrub).
 
 ### Bug Fixes
 
