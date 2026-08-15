@@ -72,6 +72,22 @@ export const LMStudioWarm: Plugin = async (_input, pluginOptions) => {
     return INACTIVE_HOOKS
   }
 
+  // Identity tier for the plugin-options tuple: `enabled` is the kill switch,
+  // so it gets the same strict-boolean contract as the config file — a
+  // non-boolean must hard-deactivate with a visible diagnostic, never be
+  // repaired to the default (which is `true`, i.e. fail-open).
+  const rawPlugEnabled = (plugOpts as Record<string, unknown>).enabled
+  if (rawPlugEnabled !== undefined && typeof rawPlugEnabled !== "boolean") {
+    const diagnostic =
+      `lm-studio-warm is INACTIVE: enabled is ${JSON.stringify(rawPlugEnabled)} in plugin options — ` +
+      `it must be the literal boolean true or false (quoted values like "false" are strings, not booleans)`
+    const diagLog = loaded.active ? loaded.opts.logFile : loaded.logFile
+    for (const w of warnings) appendLog(diagLog, `config warning: ${w}`)
+    appendLog(diagLog, `inactive: invalid (plugin options)`)
+    console.error("[lm-studio-warm] " + diagnostic)
+    return INACTIVE_HOOKS
+  }
+
   // Active (config present + enabled) OR missing (pure defaults). Layer the
   // plugin-options tuple on top, preserving DEFAULTS < file < plugin precedence,
   // then re-sanitize so a bad plugin-supplied value is repaired + warned too.
@@ -106,7 +122,7 @@ export const LMStudioWarm: Plugin = async (_input, pluginOptions) => {
 
   // opencode has no plugin UI channel — leave `notify` unset so core stays
   // log-only, matching the old opencode behavior (no UI side effects).
-  const gate = createWarmGate(opts, {})
+  const gate = createWarmGate(opts, { configHint: OPENCODE_PROFILE.configNames?.[0] })
 
   appendLog(
     opts.logFile,
@@ -168,7 +184,7 @@ export const LMStudioWarm: Plugin = async (_input, pluginOptions) => {
       }
       if (result.ok) return
       if (shouldFailRequest(opts.failMode, result)) {
-        throw new Error(`lmstudio-warm: cannot ensure model "${key}" is loaded — ${result.reason}. See ${opts.logFile}`)
+        throw new Error(`lm-studio-warm: cannot ensure model "${key}" is loaded — ${result.reason}. See ${opts.logFile}`)
       }
       appendLog(opts.logFile, `warm(${key}) not ensured (${result.reason}) — proceeding fail-open`)
     },

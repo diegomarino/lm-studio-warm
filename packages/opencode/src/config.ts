@@ -23,10 +23,15 @@ export const OPENCODE_PROFILE: RuntimeProfile = {
 }
 
 /**
- * Load opencode's config from `~/.config/opencode/`, returning the shared
- * two-tier {@link ConfigLoadResult}. Callers of the plugin factory treat a
- * `missing` result as ACTIVE-with-defaults (opencode's published contract),
- * which differs from omp/pi where missing means a silent no-op.
+ * Load opencode's config, returning the shared two-tier
+ * {@link ConfigLoadResult}. Callers of the plugin factory treat a `missing`
+ * result as ACTIVE-with-defaults (opencode's published contract), which
+ * differs from omp/pi where missing means a silent no-op.
+ *
+ * Discovery mirrors the opencode binary's own config-root resolution
+ * (`XDG_CONFIG_HOME || ~/.config`): when `XDG_CONFIG_HOME` is set, that root
+ * is probed first, with the literal `~/.config/opencode` kept as a fallback so
+ * a pre-existing config at the literal path keeps working.
  */
 export function loadOpencodeConfig(options?: {
   home?: string
@@ -34,8 +39,13 @@ export function loadOpencodeConfig(options?: {
   readFile?: (p: string) => string
 }): ConfigLoadResult {
   const home = options?.home ?? (process.env.HOME || os.homedir())
+  const env = options?.env ?? process.env
+  const xdg = env.XDG_CONFIG_HOME
+  const candidateDirs = xdg
+    ? [path.join(xdg, "opencode"), path.join(home, ".config/opencode")]
+    : [path.join(home, ".config/opencode")]
   return loadConfigFrom({
-    candidateDirs: [path.join(home, ".config/opencode")],
+    candidateDirs,
     profile: OPENCODE_PROFILE,
     home,
     env: options?.env,

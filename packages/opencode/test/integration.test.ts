@@ -227,6 +227,87 @@ async function waitFor(cond: () => boolean, ms = 5_000): Promise<boolean> {
   return cond()
 }
 
+// ─── Plugin-options kill switch (identity tier) ──────────────────────────────
+
+describe("plugin-options kill switch (identity tier)", () => {
+  it("non-boolean enabled in plugin options hard-deactivates with a visible diagnostic", async () => {
+    for (const bad of ["false", 0, "no", 1] as const) {
+      const sb = makeSandbox()
+      const errors: string[] = []
+      const origError = console.error
+      console.error = (...args: unknown[]) => errors.push(args.join(" "))
+      try {
+        const hooks = await sb.plugin({ enabled: bad as unknown as boolean })
+        expect(Object.keys(hooks)).toEqual([])
+        expect(errors.length).toBe(1)
+        expect(errors[0]).toContain("enabled")
+        expect(errors[0]).toContain("INACTIVE")
+      } finally {
+        console.error = origError
+      }
+    }
+  })
+
+  it("literal boolean false in plugin options still deactivates quietly", async () => {
+    const sb = makeSandbox()
+    const errors: string[] = []
+    const origError = console.error
+    console.error = (...args: unknown[]) => errors.push(args.join(" "))
+    try {
+      const hooks = await sb.plugin({ enabled: false })
+      expect(Object.keys(hooks)).toEqual([])
+      expect(errors.length).toBe(0)
+    } finally {
+      console.error = origError
+    }
+  })
+})
+
+// ─── XDG config discovery ────────────────────────────────────────────────────
+// The opencode binary resolves its config root as XDG_CONFIG_HOME || ~/.config;
+// the plugin must follow, or a relocated `enabled: false` is silently ignored
+// and the plugin activates on defaults (audit F5/U5).
+
+describe("XDG config discovery", () => {
+  it("honors a config (incl. the kill switch) under $XDG_CONFIG_HOME/opencode", async () => {
+    const { loadOpencodeConfig } = await import("../src/config")
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "lmswarm-xdg-home-"))
+    const xdg = fs.mkdtempSync(path.join(os.tmpdir(), "lmswarm-xdg-root-"))
+    fs.mkdirSync(path.join(xdg, "opencode"), { recursive: true })
+    fs.writeFileSync(path.join(xdg, "opencode", "lm-studio-warm.json"), JSON.stringify({ enabled: false }))
+    const r = loadOpencodeConfig({ home, env: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv })
+    expect(r.active).toBe(false)
+    if (!r.active) expect(r.reason).toBe("disabled")
+  })
+
+  it("falls back to the literal ~/.config/opencode when XDG is set but empty of config", async () => {
+    const { loadOpencodeConfig } = await import("../src/config")
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "lmswarm-xdg-home-"))
+    const xdg = fs.mkdtempSync(path.join(os.tmpdir(), "lmswarm-xdg-root-"))
+    fs.mkdirSync(path.join(home, ".config/opencode"), { recursive: true })
+    fs.writeFileSync(path.join(home, ".config/opencode", "lm-studio-warm.json"), JSON.stringify({ enabled: false }))
+    const r = loadOpencodeConfig({ home, env: { XDG_CONFIG_HOME: xdg } as NodeJS.ProcessEnv })
+    expect(r.active).toBe(false)
+    if (!r.active) expect(r.reason).toBe("disabled")
+  })
+})
+
+// ─── E2E harness contract constants ──────────────────────────────────────────
+// The live harness greps the plugin's log file by literal path; a rename in
+// config.ts must not be able to silently strand it again (audit F2/C4/D1/P2).
+
+describe("e2e harness contract constants", () => {
+  it("verify.sh and the e2e README name the profile's current log file, not the legacy one", async () => {
+    const { OPENCODE_PROFILE } = await import("../src/config")
+    const logName = path.basename(OPENCODE_PROFILE.logFile)
+    for (const rel of ["e2e/verify.sh", "e2e/README.md"]) {
+      const text = fs.readFileSync(path.join(import.meta.dir, rel), "utf8")
+      expect(text).toContain(logName)
+      expect(text).not.toContain("/lmstudio-warm.log")
+    }
+  })
+})
+
 // ─── The warm gate ───────────────────────────────────────────────────────────
 
 describe("chat.params warm gate", () => {
