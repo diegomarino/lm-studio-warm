@@ -18,9 +18,11 @@ opencode.
 - **One load across parallel sessions** — N cold spawns trigger exactly one
   `lms load`, with no `:2` duplicate instances left behind.
 
-![Quick start: install the plugin, LM Studio starts cold, the first opencode run warms the model before the request leaves, and lms ps shows both models resident with no TTL](https://github.com/user-attachments/assets/f5522cb6-7967-4f47-a8c5-ca617a8d736a)
+![Quick start: install the plugin, LM Studio starts cold, the first opencode run is held until the model is resident, the plugin log tells the story, and lms ps shows the model resident with no TTL](../../docs/quickstart-opencode.gif)
 
-<sup>Scripted demo — every output line captured verbatim from a real run; the cold-load wait is shortened, and its spinner visualizes the plugin's background `lms load` (opencode itself waits silently).</sup>
+<sup>Scripted demo (`scripts/generate-quickstart-cast.py`) — the log lines are the plugin's real
+strings in their real format; the cold-load wait is shortened. opencode itself waits silently by
+design (no toast UI), which is why the demo tails the log.</sup>
 
 Per request, the plugin verifies the model is actually loaded and, only when it
 isn't, performs that single `lms load` before letting the request through.

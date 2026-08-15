@@ -9,8 +9,9 @@ spike or racing a "no model loaded" error.
 ![Quick start: opt in with a config file, LM Studio starts cold, the first request warms the model before it leaves, and lms ps shows the model resident with no TTL](docs/quickstart.gif)
 
 <sup>Scripted demo (`scripts/generate-quickstart-cast.py`) using the `omp` package — the status/log
-lines are the plugins' real strings; the cold-load wait is shortened. See each package's own README
-for its runtime-specific quick start.</sup>
+lines are the plugins' real strings; the cold-load wait is shortened. The
+[`pi`](packages/pi/README.md) and [`opencode`](packages/opencode/README.md) READMEs carry their own
+runtime-specific demos and quick starts.</sup>
 
 ## Packages
 

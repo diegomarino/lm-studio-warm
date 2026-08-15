@@ -6,6 +6,12 @@ usage deterministic by warming target models before each `lm-studio` streaming r
 It is opt-in: if no config file exists, it does nothing and `pi` keeps its built-in `lm-studio`
 behavior.
 
+![Quick start: opt in with a config file, LM Studio starts cold, the first pi prompt warms the model before the stream leaves — with a visible working message — and lms ps shows the model resident with no TTL](../../docs/quickstart-pi.gif)
+
+<sup>Scripted demo (`scripts/generate-quickstart-cast.py`) — the working message and gate log wording
+are the extension's real strings, confirmed visible in a live session; the ~78 s cold load it
+compresses is the one actually measured there.</sup>
+
 ## What it does
 
 For every stream request routed through provider `lm-studio`, the plugin:

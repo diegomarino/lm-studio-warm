@@ -10,8 +10,10 @@
     "test": "bun run --filter './packages/*' test",
     "typecheck": "bun run --filter './packages/*' typecheck",
     "demo:play": "asciinema play docs/demo-lm-studio-warm.cast",
+    "demo:play:pi": "asciinema play docs/demo-lm-studio-warm-pi.cast",
+    "demo:play:opencode": "asciinema play docs/demo-lm-studio-warm-opencode.cast",
     "demo:cast": "python3 scripts/generate-quickstart-cast.py",
-    "demo:gif": "python3 scripts/generate-quickstart-cast.py && agg --font-size 16 --last-frame-duration 8 docs/demo-lm-studio-warm.cast docs/quickstart.gif && python3 scripts/add-progress-bar.py docs/quickstart.gif && gifsicle -O3 --colors 256 --batch docs/quickstart.gif",
+    "demo:gif": "bash scripts/render-demos.sh",
     "demo:record": "bash ./scripts/record-demo.sh",
     "release-please:validate": "release-please --help > /dev/null"
   },
