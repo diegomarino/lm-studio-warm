@@ -11,6 +11,9 @@ demo-test.cast
 # opencode runtime state the live e2e can leave behind (change audit X4)
 .auto-update-history.json
 
+# local audit workspace — reports/ledgers/machine notes stay unpublished
+docs/audits/
+
 # repo-level state (main): linked worktrees and agent session dirs
 .worktrees/
 .superpowers/
