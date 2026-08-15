@@ -1,0 +1,70 @@
+# npm publish via trusted publishing (maintainer decision F15).
+#
+# Auth is OIDC — no npm token lives in this repo or its secrets. Each package
+# must have this workflow registered as its trusted publisher on npmjs.com
+# (package → Settings → Trusted Publisher: GitHub Actions,
+# diegomarino/lm-studio-warm, publish.yml). Provenance is generated
+# automatically by npm under trusted publishing.
+#
+# BOOTSTRAP CAVEAT: a trusted publisher is configured in the settings of an
+# EXISTING package, and these names are unscoped — so the very first publish
+# of each new package cannot use this workflow. RELEASING §3 does that one
+# bootstrap publish with a short-lived granular token, then registers the
+# trusted publisher; every release after that flows through here.
+#
+# Trigger: release-please publishing the GitHub releases (one event per
+# package) or a manual dispatch. The job is idempotent and order-preserving:
+# it walks core → pi → omp → opencode and publishes only versions npm doesn't
+# have yet, so a burst of simultaneous release events cannot publish a
+# dependent before its dependency. The pointer package is deliberately
+# excluded — its publish is the manual, version-decided step (RELEASING §4).
+#
+# Actions are SHA-pinned (audit F28): a tag move cannot change what runs here.
+name: publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # OIDC token for npm trusted publishing
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm ≥ 11.5.1; pin to a floor, not a float.
+      - run: npm install -g npm@11
+      - run: bun install --frozen-lockfile
+      # The F15 gate: nothing publishes unless the whole workspace checks out
+      # and the dependency audit is clean.
+      - run: bun run check
+      - run: bun audit
+      - name: Publish missing versions (core → pi → omp → opencode)
+        run: |
+          set -euo pipefail
+          for pkg in core pi omp opencode; do
+            dir="packages/$pkg"
+            name=$(jq -r .name "$dir/package.json")
+            version=$(jq -r .version "$dir/package.json")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version already on npm — skipping"
+              continue
+            fi
+            echo "publishing $name@$version"
+            (cd "$dir" && npm publish)
+          done
