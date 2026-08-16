@@ -4,9 +4,9 @@
 
 It is opt-in: if no config file exists, it does nothing and omp keeps its built-in `lm-studio` behavior.
 
-![Quick start: opt in with a config file, LM Studio starts cold, the first omp request warms the model before it leaves, and lms ps shows the model resident with no TTL](../../docs/assets/quickstart-omp.gif)
+![Quick start: opt in with a config file, LM Studio starts cold, the first omp request warms the model before it leaves, and lms ps shows the model resident with no TTL](https://raw.githubusercontent.com/diegomarino/lm-studio-warm/main/docs/assets/quickstart-omp.gif)
 
-<sup>Scripted demo (`scripts/generate-quickstart-cast.py`) — the status/log lines are the plugin's real strings (this package's `src/stream.ts` and the shared [`lm-studio-warm-core`](../core)'s `src/warm-gate.ts`); the cold-load wait is shortened. Unlike opencode, omp really does show the warming message in its status area while the gate holds the request.</sup>
+<sup>Scripted demo (`scripts/generate-quickstart-cast.py`) — the status/log lines are the plugin's real strings (this package's `src/stream.ts` and the shared [`lm-studio-warm-core`](https://github.com/diegomarino/lm-studio-warm/tree/main/packages/core)'s `src/warm-gate.ts`); the cold-load wait is shortened. Unlike opencode, omp really does show the warming message in its status area while the gate holds the request.</sup>
 
 ## What it does
 
@@ -86,7 +86,7 @@ YAML
 
 ## Configuration
 
-See [`packages/core/README.md`](../core/README.md#configuration-reference) for
+See [`packages/core/README.md`](https://github.com/diegomarino/lm-studio-warm/blob/main/packages/core/README.md#configuration-reference) for
 the canonical, shared option reference — every `WarmOptions` key, its default,
 and its tier (identity vs. tuning) — plus the full lock/staleness semantics.
 This package uses those options unchanged, with omp-shaped defaults:
@@ -170,8 +170,8 @@ Two demo artifacts ship with the repository. All commands in this section run
 **from the repo root of a monorepo checkout** — the `demo:*` scripts live in the
 root `package.json` and are not part of the published package:
 
-**Quick-start cast** — `../../docs/assets/quickstart-omp.cast` (rendered to
-`../../docs/assets/quickstart-omp.gif` above). A scripted asciicast in the style of `opencode-lmstudio-warm`'s quickstart:
+**Quick-start cast** — `docs/assets/quickstart-omp.cast` (rendered to
+`docs/assets/quickstart-omp.gif` above). A scripted asciicast in the style of `opencode-lmstudio-warm`'s quickstart:
 opt-in via config file, cold `lms ps`, first request warmed before it leaves omp
 (spinner = the plugin's real status-bar message), then the model resident with no
 TTL. Scripted rather than screen-recorded so it stays reproducible and free of
@@ -179,7 +179,7 @@ machine-specific noise; plugin-facing lines are its real strings.
 
 - `bun run demo:play` → play the shipped cast (requires `asciinema`).
 - `bun run demo:cast` → regenerate the cast (`scripts/generate-quickstart-cast.py`).
-- `bun run demo:gif` → regenerate cast + `../../docs/assets/quickstart-omp.gif` (needs `agg`, `gifsicle`, Pillow).
+- `bun run demo:gif` → regenerate cast + `docs/assets/quickstart-omp.gif` (needs `agg`, `gifsicle`, Pillow).
 
 **Functional check** — `scripts/demo-console.ts` validates the activation contract
 without opening LM Studio: inactive mode registers nothing, an active config is
@@ -198,7 +198,7 @@ Every failure message points at the log (default
 `~/.cache/omp/lm-studio-warm.log`). The failure vocabulary is core-shared
 across all three runtimes — the canonical symptom → meaning → action table
 lives in the
-[core README's Troubleshooting section](../core/README.md#troubleshooting).
+[core README's Troubleshooting section](https://github.com/diegomarino/lm-studio-warm/blob/main/packages/core/README.md#troubleshooting).
 
 omp-specific notes:
 

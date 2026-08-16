@@ -6,8 +6,8 @@ deterministic LM Studio model pre-warm gate. It owns the cross-process lock, evi
 runtime (omp, pi, opencode, etc).
 
 This package has no user-facing entry point on its own; it is consumed by runtime adapters —
-[`omp-lm-studio-warm`](../omp), [`pi-lm-studio-warm`](../pi), and
-[`opencode-lm-studio-warm`](../opencode) — each of which supplies a `RuntimeProfile` (providers to
+[`omp-lm-studio-warm`](https://github.com/diegomarino/lm-studio-warm/tree/main/packages/omp), [`pi-lm-studio-warm`](https://github.com/diegomarino/lm-studio-warm/tree/main/packages/pi), and
+[`opencode-lm-studio-warm`](https://github.com/diegomarino/lm-studio-warm/tree/main/packages/opencode) — each of which supplies a `RuntimeProfile` (providers to
 gate, default log path, config filenames) and its own config-directory resolution.
 
 > **This is the canonical configuration reference.** Every wiring package's README links here

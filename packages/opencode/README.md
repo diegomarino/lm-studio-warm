@@ -18,7 +18,7 @@ opencode.
 - **One load across parallel sessions** — N cold spawns trigger exactly one
   `lms load`, with no `:2` duplicate instances left behind.
 
-![Quick start: install the plugin, LM Studio starts cold, the first opencode run is held until the model is resident, the plugin log tells the story, and lms ps shows the model resident with no TTL](../../docs/assets/quickstart-opencode.gif)
+![Quick start: install the plugin, LM Studio starts cold, the first opencode run is held until the model is resident, the plugin log tells the story, and lms ps shows the model resident with no TTL](https://raw.githubusercontent.com/diegomarino/lm-studio-warm/main/docs/assets/quickstart-opencode.gif)
 
 <sup>Scripted demo (`scripts/generate-quickstart-cast.py`) — the log lines are the plugin's real
 strings in their real format; the cold-load wait is shortened. opencode itself waits silently by
@@ -177,7 +177,7 @@ the opencode binary's own rule: when `XDG_CONFIG_HOME` is set,
 > machine — a non-loopback URL is logged as a warning, and the gate can
 > neither verify nor load models on a remote server.
 
-See [`packages/core/README.md`](../core/README.md#configuration-reference) for
+See [`packages/core/README.md`](https://github.com/diegomarino/lm-studio-warm/blob/main/packages/core/README.md#configuration-reference) for
 the canonical, shared option reference — every `WarmOptions` key, its default,
 and its tier (identity vs. tuning) — plus the full lock/staleness semantics.
 This package uses those options unchanged, with opencode-shaped defaults:
@@ -375,7 +375,7 @@ it is not required.
 When a request fails with an `lm-studio-warm:` error, the log at
 `~/.cache/opencode/lm-studio-warm.log` has the detail — the canonical
 symptom → meaning → action decoder for that vocabulary lives in the
-[core README's Troubleshooting section](../core/README.md#troubleshooting).
+[core README's Troubleshooting section](https://github.com/diegomarino/lm-studio-warm/blob/main/packages/core/README.md#troubleshooting).
 
 - **30 s verified-cache window**: an external unload (GUI, crash) within 30 s
   of a positive check can slip one request through; it errors visibly and the
@@ -415,7 +415,7 @@ cannot heal mid-session evictions; the plugin does.
 ## Development
 
 The plugin is a thin adapter over the shared
-[`lm-studio-warm-core`](../core) package — the pure helpers, the `lms` client,
+[`lm-studio-warm-core`](https://github.com/diegomarino/lm-studio-warm/tree/main/packages/core) package — the pure helpers, the `lms` client,
 and the audited warm gate all live in core; `src/index.ts` keeps only the
 opencode-specific hooks, input-shape reads, and two-tier config activation. Its
 only other import, `@opencode-ai/plugin`, is `import type` and erased at build

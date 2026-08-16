@@ -6,7 +6,7 @@ usage deterministic by warming target models before each `lm-studio` streaming r
 It is opt-in: if no config file exists, it does nothing and `pi` keeps its built-in `lm-studio`
 behavior.
 
-![Quick start: opt in with a config file, LM Studio starts cold, the first pi prompt warms the model before the stream leaves — with a visible working message — and lms ps shows the model resident with no TTL](../../docs/assets/quickstart-pi.gif)
+![Quick start: opt in with a config file, LM Studio starts cold, the first pi prompt warms the model before the stream leaves — with a visible working message — and lms ps shows the model resident with no TTL](https://raw.githubusercontent.com/diegomarino/lm-studio-warm/main/docs/assets/quickstart-pi.gif)
 
 <sup>Scripted demo (`scripts/generate-quickstart-cast.py`) — the working message and gate log wording
 are the extension's real strings, confirmed visible in a live session; the ~78 s cold load it
@@ -83,7 +83,7 @@ YAML
 
 ## Configuration
 
-See [`packages/core/README.md`](../core/README.md#configuration-reference) for the canonical,
+See [`packages/core/README.md`](https://github.com/diegomarino/lm-studio-warm/blob/main/packages/core/README.md#configuration-reference) for the canonical,
 shared option reference — every `WarmOptions` key, its default, and its tier (identity vs. tuning)
 — plus the full lock/staleness semantics. This package uses those options unchanged, with
 `pi`-shaped defaults: `providers: ['lm-studio']` and `logFile: ~/.cache/pi/lm-studio-warm.log`.
@@ -117,7 +117,7 @@ sooner, wait out the cooldown or restart the session.
 Every failure message points at the log (default
 `~/.cache/pi/lm-studio-warm.log`). The failure vocabulary is core-shared
 across all three runtimes — see the canonical symptom → meaning → action table
-in the [core README's Troubleshooting section](../core/README.md#troubleshooting).
+in the [core README's Troubleshooting section](https://github.com/diegomarino/lm-studio-warm/blob/main/packages/core/README.md#troubleshooting).
 
 ## Logs / lock paths
 
