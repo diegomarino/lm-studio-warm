@@ -1,6 +1,6 @@
 {
   "name": "pi-lm-studio-warm",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Deterministic LM Studio model pre-warm gate for pi — loads and keeps the target model resident before every completion stream.",
   "type": "module",
   "license": "MIT",
@@ -39,7 +39,9 @@
     "local-llm"
   ],
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -47,7 +49,7 @@
     "check": "bun run typecheck && bun run test"
   },
   "dependencies": {
-    "lm-studio-warm-core": "^0.1.0"
+    "lm-studio-warm-core": "^0.2.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.83.0 <1",

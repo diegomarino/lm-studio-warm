@@ -1,6 +1,6 @@
 {
   "name": "omp-lm-studio-warm",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Deterministic LM Studio model pre-warm gate for omp — loads and keeps the target model resident before every completion stream.",
   "type": "module",
   "license": "MIT",
@@ -45,10 +45,12 @@
     "check": "bun run typecheck && bun run test"
   },
   "omp": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "dependencies": {
-    "lm-studio-warm-core": "^0.1.0"
+    "lm-studio-warm-core": "^0.2.0"
   },
   "peerDependencies": {
     "@oh-my-pi/pi-ai": "^17.2.12",
