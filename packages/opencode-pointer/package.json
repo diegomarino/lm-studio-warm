@@ -30,7 +30,7 @@
     "LICENSE"
   ],
   "dependencies": {
-    "opencode-lm-studio-warm": "^0.2.1"
+    "opencode-lm-studio-warm": "^0.3.0"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
