@@ -21,9 +21,8 @@ runtime-specific demos and quick starts.</sup>
 | [`packages/omp`](packages/omp) | `omp-lm-studio-warm` | [`omp`](https://github.com/can1357/oh-my-pi) extension — warms LM Studio models before every `lm-studio` completion stream. |
 | [`packages/pi`](packages/pi) | `pi-lm-studio-warm` | [`pi`](https://github.com/earendil-works/pi) extension — same gate, wired as a native `lm-studio` provider. |
 | [`packages/opencode`](packages/opencode) | `opencode-lm-studio-warm` | [opencode](https://opencode.ai) plugin — gates every request via the `chat.params` hook; heals mid-session TTL evictions. |
-| [`packages/opencode-pointer`](packages/opencode-pointer) | `opencode-lmstudio-warm` | Compatibility re-export shell for the pre-rename npm name; excluded from automated releases (manual publishes, see [RELEASING.md](RELEASING.md)). |
 
-All four active packages (`core`, `omp`, `pi`, `opencode`) share the same
+All four packages share the same
 `WarmOptions` config shape and the same cross-process lock at
 `~/.cache/lm-studio-warm/lock` — see
 [`packages/core/README.md`](packages/core/README.md) for the canonical
@@ -39,14 +38,14 @@ lm-studio-warm/
 ├── tsconfig.base.json · bunfig.toml
 ├── release-please-config.json · .release-please-manifest.json
 ├── RELEASING.md                      # publish runbook
-├── .github/workflows/                # ci.yml (per-package matrix), release-please.yml
-├── docs/                             # audits/, superpowers specs & plans, shared demo assets
+├── .github/workflows/                # ci.yml (per-package matrix), release-please.yml, publish.yml
+├── docs/                             # superpowers specs & plans, shared demo assets
 └── packages/
     ├── core/              → npm lm-studio-warm-core
     ├── omp/                → npm omp-lm-studio-warm
     ├── pi/                 → npm pi-lm-studio-warm
     ├── opencode/           → npm opencode-lm-studio-warm
-    └── opencode-pointer/   → npm opencode-lmstudio-warm (old name; manual releases only)
+    └── opencode-pointer/   → legacy-name shim (see Releases)
 ```
 
 ## Development
@@ -58,20 +57,20 @@ bun run typecheck
 bun run test
 ```
 
-CI (`.github/workflows/ci.yml`) runs a per-package matrix
-(`bun run --filter './packages/<name>' check` for core, omp, pi, opencode,
-opencode-pointer) plus a `bun audit` job.
+CI (`.github/workflows/ci.yml`) runs a per-package check matrix plus a
+`bun audit` job.
 
 See `packages/*/README.md` for package-specific documentation.
 
 ## Releases
 
 Versioning is automated with [release-please](https://github.com/googleapis/release-please)
-in manifest mode, one component per package under `packages/*` (`opencode-pointer`
-excluded — it's released manually). Conventional commits drive per-package
-version bumps; no one edits a version number by hand. See
-[RELEASING.md](RELEASING.md) for the full runbook, including the
-`opencode-pointer` manual-publish process.
+in manifest mode, one component per package. Conventional commits drive
+per-package version bumps; no one edits a version number by hand. The only
+exception is `packages/opencode-pointer` — a re-export shim that keeps the
+pre-rename npm name (`opencode-lmstudio-warm`) resolving to the new package;
+it is not a fifth integration and is published manually. Full runbook in
+[RELEASING.md](RELEASING.md).
 
 ## License
 
