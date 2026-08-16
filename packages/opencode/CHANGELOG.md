@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.3.0](https://github.com/diegomarino/lm-studio-warm/compare/opencode-v0.2.3...opencode-v0.3.0) (2026-08-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* **opencode:** package renamed from opencode-lmstudio-warm; default lockDir is now the shared ~/.cache/lm-studio-warm/lock and the default log moved to ~/.cache/opencode/lm-studio-warm.log. Adds the enabled kill-switch and two-tier config safety; legacy ~/.config/opencode/lmstudio-warm.json is still read.
+
+### Features
+
+* **opencode:** migrate opencode-lm-studio-warm onto lm-studio-warm-core ([7c83cc0](https://github.com/diegomarino/lm-studio-warm/commit/7c83cc0a23eba3f9cb6cc58a354182d17e6fbdac))
+
+
+### Bug Fixes
+
+* **opencode:** honor the XDG config root and harden the plugin-options kill switch ([fe6d929](https://github.com/diegomarino/lm-studio-warm/commit/fe6d929fed9cfe4e0c68b2bbe58f64883c969167))
+* **opencode:** load the e2e fixture under the 1.18 plugin loader and self-isolate the run ([80c0bb9](https://github.com/diegomarino/lm-studio-warm/commit/80c0bb99e951faf509f4302d07bc56682dcc3700))
+* **pi:** honor configured providers for eager warm; refactor(core): dedupe summarizeWarnings ([81ae835](https://github.com/diegomarino/lm-studio-warm/commit/81ae8356a685f0cbfd4b6e9ce96ec1b70f10dff0))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * lm-studio-warm-core bumped from ^0.1.0 to ^0.2.0
+
 ## [0.2.3](https://github.com/diegomarino/opencode-lmstudio-warm/compare/v0.2.2...v0.2.3) (2026-08-05)
 
 Published from the pre-monorepo repository; its changes were carried into this
