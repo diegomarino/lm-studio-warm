@@ -123,7 +123,7 @@ in the [core README's Troubleshooting section](https://github.com/diegomarino/lm
 
 - Log: `~/.cache/pi/lm-studio-warm.log`
 - Lock: `~/.cache/lm-studio-warm/lock` — **shared across runtimes.** `omp`, `pi` and
-  `opencode-lm-studio-warm` sessions all default to this one lock directory, because it guards one
+  `opencode-lmstudio-warm` sessions all default to this one lock directory, because it guards one
   physical resource: the local LM Studio process.
 
 ## Development

@@ -140,7 +140,7 @@ stream request ──> createGatedStreamFn
 
 - Log: `~/.cache/omp/lm-studio-warm.log`
 - Lock: `~/.cache/lm-studio-warm/lock` — **shared across runtimes.** omp, `pi`
-  and `opencode-lm-studio-warm` sessions all default to this one lock
+  and `opencode-lmstudio-warm` sessions all default to this one lock
   directory, because it guards one physical resource: the local LM Studio
   process. The lock holder records its own `loadTimeoutMs` budget into the
   lock (as a `deadline` file); a waiter with a shorter timeout will not break

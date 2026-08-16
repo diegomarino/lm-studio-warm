@@ -18,7 +18,7 @@ lines are the plugins' real strings; the cold-load wait is shortened.</sup>
 | [`packages/core`](packages/core) | `lm-studio-warm-core` | Runtime-agnostic core: cross-process lock, eviction planning, `lms` CLI client, model discovery, two-tier config loading. Not user-facing on its own. |
 | [`packages/omp`](packages/omp) | `omp-lm-studio-warm` | [`omp`](https://github.com/can1357/oh-my-pi) extension — warms LM Studio models before every `lm-studio` completion stream. |
 | [`packages/pi`](packages/pi) | `pi-lm-studio-warm` | [`pi`](https://github.com/earendil-works/pi) extension — same gate, wired as a native `lm-studio` provider. |
-| [`packages/opencode`](packages/opencode) | `opencode-lm-studio-warm` | [opencode](https://opencode.ai) plugin — gates every request via the `chat.params` hook; heals mid-session TTL evictions. |
+| [`packages/opencode`](packages/opencode) | `opencode-lmstudio-warm` | [opencode](https://opencode.ai) plugin — gates every request via the `chat.params` hook; heals mid-session TTL evictions. |
 
 All four packages share the same
 `WarmOptions` config shape and the same cross-process lock at
@@ -41,8 +41,7 @@ lm-studio-warm/
     ├── core/              → npm lm-studio-warm-core
     ├── omp/               → npm omp-lm-studio-warm
     ├── pi/                → npm pi-lm-studio-warm
-    ├── opencode/          → npm opencode-lm-studio-warm
-    └── opencode-pointer/  → legacy-name shim (see Releases)
+    └── opencode/          → npm opencode-lmstudio-warm
 ```
 
 ## Development
@@ -63,9 +62,12 @@ See `packages/*/README.md` for package-specific documentation.
 
 Versioning is automated with [release-please](https://github.com/googleapis/release-please)
 in manifest mode, one component per package. Conventional commits drive
-per-package version bumps; no one edits a version number by hand. The only
-exception is `packages/opencode-pointer` — a re-export shim that keeps the
-pre-rename npm name (`opencode-lmstudio-warm`) resolving to the new package.
+per-package version bumps; no one edits a version number by hand.
+
+Naming note: the opencode package keeps its historical npm spelling
+(`opencode-lmstudio-warm`, no hyphen in "lmstudio") — npm rejects new names
+that differ from an existing package only in punctuation, so the rename to
+match its siblings is not possible on the registry.
 
 ## License
 

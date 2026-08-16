@@ -13,14 +13,14 @@
     },
     "packages/core": {
       "name": "lm-studio-warm-core",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "yaml": "^2.8.0",
       },
     },
     "packages/omp": {
       "name": "omp-lm-studio-warm",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "lm-studio-warm-core": "^0.1.0",
       },
@@ -41,10 +41,10 @@
       ],
     },
     "packages/opencode": {
-      "name": "opencode-lm-studio-warm",
-      "version": "0.2.1",
+      "name": "opencode-lmstudio-warm",
+      "version": "0.3.0",
       "dependencies": {
-        "lm-studio-warm-core": "^0.1.0",
+        "lm-studio-warm-core": "^0.2.0",
       },
       "devDependencies": {
         "@opencode-ai/plugin": "1.17.10",
@@ -53,16 +53,9 @@
         "typescript": "^5.8.3",
       },
     },
-    "packages/opencode-pointer": {
-      "name": "opencode-lmstudio-warm",
-      "version": "0.0.0",
-      "dependencies": {
-        "opencode-lm-studio-warm": "^0.2.1",
-      },
-    },
     "packages/pi": {
       "name": "pi-lm-studio-warm",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "lm-studio-warm-core": "^0.1.0",
       },
@@ -777,9 +770,7 @@
 
     "openai": ["openai@6.26.0", "", { "peerDependencies": { "ws": "^8.18.0", "zod": "^3.25 || ^4.0" }, "optionalPeers": ["ws", "zod"], "bin": { "openai": "bin/cli" } }, "sha512-zd23dbWTjiJ6sSAX6s0HrCZi41JwTA1bQVs0wLQPZ2/5o2gxOJA5wh7yOAUgwYybfhDXyhwlpeQf7Mlgx8EOCA=="],
 
-    "opencode-lm-studio-warm": ["opencode-lm-studio-warm@workspace:packages/opencode"],
-
-    "opencode-lmstudio-warm": ["opencode-lmstudio-warm@workspace:packages/opencode-pointer"],
+    "opencode-lmstudio-warm": ["opencode-lmstudio-warm@workspace:packages/opencode"],
 
     "p-limit": ["p-limit@2.3.0", "", { "dependencies": { "p-try": "^2.0.0" } }, "sha512-//88mFWSJx8lxCzwdAABTJL2MyWB12+eIY7MDL2SqLmAkeKU9qxRvWuSyTjm3FUmpBEMuFfckAIqEaVGUDxb6w=="],
 

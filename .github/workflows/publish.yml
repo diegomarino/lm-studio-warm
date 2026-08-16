@@ -13,11 +13,13 @@
 # trusted publisher; every release after that flows through here.
 #
 # Trigger: release-please publishing the GitHub releases (one event per
-# package) or a manual dispatch. The job is idempotent and order-preserving:
-# it walks core → pi → omp → opencode and publishes only versions npm doesn't
-# have yet, so a burst of simultaneous release events cannot publish a
-# dependent before its dependency. The pointer package is deliberately
-# excluded — its publish is the manual, version-decided step (RELEASING §4).
+# package) or a manual dispatch. NOTE: releases created by the default
+# GITHUB_TOKEN do not fire this workflow (GitHub anti-recursion) — until
+# release-please gets its own token, dispatch this manually after merging a
+# release PR. The job is idempotent and order-preserving: it walks
+# core → pi → omp → opencode and publishes only versions npm doesn't have
+# yet, so a burst of simultaneous release events cannot publish a dependent
+# before its dependency.
 #
 # Actions are SHA-pinned (audit F28): a tag move cannot change what runs here.
 name: publish

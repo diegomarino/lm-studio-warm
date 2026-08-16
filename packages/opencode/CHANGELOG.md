@@ -5,11 +5,11 @@
 
 ### ⚠ BREAKING CHANGES
 
-* **opencode:** package renamed from opencode-lmstudio-warm; default lockDir is now the shared ~/.cache/lm-studio-warm/lock and the default log moved to ~/.cache/opencode/lm-studio-warm.log. Adds the enabled kill-switch and two-tier config safety; legacy ~/.config/opencode/lmstudio-warm.json is still read.
+* **opencode:** the plugin now lives in the lm-studio-warm monorepo (the npm name is unchanged — npm's name-similarity rule forbids the planned rename); default lockDir is now the shared ~/.cache/lm-studio-warm/lock and the default log moved to ~/.cache/opencode/lm-studio-warm.log. Adds the enabled kill-switch and two-tier config safety; legacy ~/.config/opencode/lmstudio-warm.json is still read.
 
 ### Features
 
-* **opencode:** migrate opencode-lm-studio-warm onto lm-studio-warm-core ([7c83cc0](https://github.com/diegomarino/lm-studio-warm/commit/7c83cc0a23eba3f9cb6cc58a354182d17e6fbdac))
+* **opencode:** migrate opencode-lmstudio-warm onto lm-studio-warm-core ([7c83cc0](https://github.com/diegomarino/lm-studio-warm/commit/7c83cc0a23eba3f9cb6cc58a354182d17e6fbdac))
 
 
 ### Bug Fixes

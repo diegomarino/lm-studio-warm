@@ -1,4 +1,4 @@
-# opencode-lm-studio-warm
+# opencode-lmstudio-warm
 
 Deterministic, dependency-free model pre-warm for **opencode + LM Studio**.
 Guarantees your model is loaded and addressable _before_ any request leaves
@@ -37,23 +37,13 @@ behaviors the plugin depends on are the `lms ps --json` field names
 
 ## Quick start
 
-> **Not published yet.** `opencode-lm-studio-warm` is not on npm yet (the
-> published predecessor is the legacy `opencode-lmstudio-warm`); the npm
-> commands below will work once the rename release ships. Until then, install
-> from a local checkout of this monorepo: run `bun install` at its root, then
-> use the [plugin-file re-export](#plugin-file-re-export) pattern pointing at
-> the checkout — e.g. `~/.config/opencode/plugin/lm-studio-warm.ts` containing
-> `export { LMStudioWarm } from "/path/to/lm-studio-warm/packages/opencode/src/index"`.
-> (Use the NAMED re-export: opencode ≥1.18's plugin loader does not enumerate
-> `export * from` re-exports — verified live on 1.18.0.)
-
 **1. Install and register the plugin** — one command; opencode resolves it from
 npm and adds it to your config's `plugin` array:
 
 ```bash
-opencode plugin -g opencode-lm-studio-warm    # global (~/.config/opencode) — every session on the machine
+opencode plugin -g opencode-lmstudio-warm    # global (~/.config/opencode) — every session on the machine
 # or, for a single project's opencode.json:
-opencode plugin opencode-lm-studio-warm
+opencode plugin opencode-lmstudio-warm
 ```
 
 **2. Point opencode at LM Studio** (skip if you already have an `lmstudio`
@@ -61,7 +51,7 @@ provider). In `~/.config/opencode/opencode.json`:
 
 ```jsonc
 {
-  "plugin": ["opencode-lm-studio-warm"],
+  "plugin": ["opencode-lmstudio-warm"],
   "provider": {
     "lmstudio": {
       "npm": "@ai-sdk/openai-compatible",
@@ -104,7 +94,7 @@ The Quick start command above is all you need. Notes:
 
 - You don't run `npm install` / `bun add` yourself, and there's no `npx` step —
   opencode imports the module and auto-installs any plugin named in your config
-  at startup, so hand-adding `"opencode-lm-studio-warm"` to the `plugin` array
+  at startup, so hand-adding `"opencode-lmstudio-warm"` to the `plugin` array
   works too.
 - Use `-f` to force a version bump.
 
@@ -117,7 +107,7 @@ models, and never overwrites options you've set.
 CFG=~/.config/opencode/opencode.json   # or ./opencode.json for a single project
 [ -f "$CFG" ] || echo '{}' > "$CFG"
 jq '
-  .plugin = ((.plugin // []) - ["opencode-lm-studio-warm"] + ["opencode-lm-studio-warm"])
+  .plugin = ((.plugin // []) - ["opencode-lmstudio-warm"] + ["opencode-lmstudio-warm"])
   | .provider.lmstudio.npm                  //= "@ai-sdk/openai-compatible"
   | .provider.lmstudio.options.baseURL      //= "http://127.0.0.1:1234/v1"
   | .provider.lmstudio.options.apiKey       //= "{env:LM_API_TOKEN}"
@@ -128,15 +118,15 @@ jq '
 
 ### Plugin-file re-export
 
-Install the package the normal way — `npm install opencode-lm-studio-warm` /
-`bun add opencode-lm-studio-warm` — then, instead of adding it to the `plugin`
+Install the package the normal way — `npm install opencode-lmstudio-warm` /
+`bun add opencode-lmstudio-warm` — then, instead of adding it to the `plugin`
 array, drop a one-line re-export where opencode's plugin auto-discovery looks:
 
 ```ts
 // ~/.config/opencode/plugin/lm-studio-warm.ts (global — every session on the
 // machine) or .opencode/plugin/lm-studio-warm.ts (project-local — this
 // project only)
-export { LMStudioWarm } from "opencode-lm-studio-warm"
+export { LMStudioWarm } from "opencode-lmstudio-warm"
 ```
 
 > Use the NAMED re-export, not `export * from ...`: opencode ≥1.18's plugin
@@ -166,7 +156,7 @@ the JSON/`jq` above.
 The plugin works with zero configuration. Optional tuning lives in
 `~/.config/opencode/lm-studio-warm.json` (the legacy `lmstudio-warm.json`
 filename is still read for backward compatibility), or inline as
-`"plugin": [["opencode-lm-studio-warm", {...}]]`. Set `"enabled": false` in the
+`"plugin": [["opencode-lmstudio-warm", {...}]]`. Set `"enabled": false` in the
 JSON file to turn the gate off without uninstalling. Config discovery follows
 the opencode binary's own rule: when `XDG_CONFIG_HOME` is set,
 `$XDG_CONFIG_HOME/opencode/` is probed first, with the literal
@@ -301,12 +291,12 @@ reconciled back to an addressable instance. See
 
 ## Uninstall / rollback
 
-For the npm install path, remove `"opencode-lm-studio-warm"` from the `plugin`
+For the npm install path, remove `"opencode-lmstudio-warm"` from the `plugin`
 array in `opencode.json`. For the plugin-file re-export path:
 
 ```bash
 rm ~/.config/opencode/plugin/lm-studio-warm.ts   # or .opencode/plugin/lm-studio-warm.ts — removes the gate
-npm uninstall opencode-lm-studio-warm            # or bun remove, wherever it was installed
+npm uninstall opencode-lmstudio-warm            # or bun remove, wherever it was installed
 rm -f ~/.config/opencode/lm-studio-warm.json     # optional tuning file (or legacy lmstudio-warm.json)
 rm -rf ~/.cache/lm-studio-warm/lock              # only if a stale lock lingers (shared lock dir)
 ```

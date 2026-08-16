@@ -7,7 +7,7 @@
     "packages/core": { "package-name": "lm-studio-warm-core", "component": "core" },
     "packages/omp": { "package-name": "omp-lm-studio-warm", "component": "omp" },
     "packages/pi": { "package-name": "pi-lm-studio-warm", "component": "pi" },
-    "packages/opencode": { "package-name": "opencode-lm-studio-warm", "component": "opencode" }
+    "packages/opencode": { "package-name": "opencode-lmstudio-warm", "component": "opencode" }
   },
   "plugins": [{ "type": "node-workspace", "updatePeerDependencies": true }]
 }
