@@ -12,8 +12,8 @@ render() { # $1 = cast, $2 = gif
   gifsicle -O3 --colors 256 --batch "$2"
 }
 
-render docs/demo-lm-studio-warm.cast           docs/quickstart.gif
-render docs/demo-lm-studio-warm-pi.cast        docs/quickstart-pi.gif
-render docs/demo-lm-studio-warm-opencode.cast  docs/quickstart-opencode.gif
+render docs/assets/quickstart-omp.cast      docs/assets/quickstart-omp.gif
+render docs/assets/quickstart-pi.cast       docs/assets/quickstart-pi.gif
+render docs/assets/quickstart-opencode.cast docs/assets/quickstart-opencode.gif
 
-ls -lh docs/quickstart*.gif
+ls -lh docs/assets/quickstart-*.gif

@@ -3,10 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-CAST_FILE="${1:-docs/demo-lm-studio-warm.cast}"
+CAST_FILE="${1:-docs/assets/quickstart-omp.cast}"
 
 if [[ "$CAST_FILE" != *.cast ]]; then
-  echo "Output must be a .cast file. Example: ./scripts/record-demo.sh docs/demo-lm-studio-warm.cast" >&2
+  echo "Output must be a .cast file. Example: ./scripts/record-demo.sh docs/assets/quickstart-omp.cast" >&2
   exit 1
 fi
 

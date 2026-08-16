@@ -11,7 +11,7 @@ CHUNK_MS are therefore subdivided into copies that only differ in bar fill,
 so the bar keeps sliding through pauses. gifsicle's frame-diff optimization
 makes the copies nearly free (only the bar strip changes).
 
-Usage:  python3 scripts/add-progress-bar.py docs/quickstart.gif [output.gif]
+Usage:  python3 scripts/add-progress-bar.py docs/assets/quickstart-omp.gif [output.gif]
 
 Re-quantizing per frame breaks GIF inter-frame compression; recover it with
 `gifsicle -O3 --colors 256 --batch <gif>` afterwards.
@@ -27,7 +27,7 @@ FILL = (78, 201, 176)  # teal accent, matches the prompt/table greens
 BAR_H = 4
 CHUNK_MS = 200         # max per-frame duration before subdividing
 
-src = sys.argv[1] if len(sys.argv) > 1 else "docs/quickstart.gif"
+src = sys.argv[1] if len(sys.argv) > 1 else "docs/assets/quickstart-omp.gif"
 dst = sys.argv[2] if len(sys.argv) > 2 else src
 
 im = Image.open(src)

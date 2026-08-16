@@ -616,7 +616,7 @@ describe("eager warm", () => {
 // The fake's psRaw/lsRaw inject exact stdout the JSON.stringify default cannot:
 // a leading BOM, an object wrapper, a non-array, garbage. These drive the REAL
 // psInstances → parseLmsJsonArray → classifyPs path end-to-end. (Scenario A of
-// docs/superpowers/specs/2026-08-05-adversarial-integration-tests-design.md.)
+// the adversarial-integration-tests design that accompanied issue #3.)
 
 describe("lms output shape-drift", () => {
   const resident = [{ modelKey: "k", identifier: "k", status: "idle", queued: 0 }]

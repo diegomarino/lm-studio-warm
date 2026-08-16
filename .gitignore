@@ -5,14 +5,15 @@ dist/
 .cache/
 coverage/
 *.tsbuildinfo
-# scratch recordings (the shipped demo cast docs/demo-lm-studio-warm.cast IS tracked)
+# scratch recordings (the shipped demo cast docs/assets/quickstart-omp.cast IS tracked)
 demo-test.cast
 
 # opencode runtime state the live e2e can leave behind (change audit X4)
 .auto-update-history.json
 
-# local audit workspace — reports/ledgers/machine notes stay unpublished
+# local maintainer workspaces — audits, superpowers specs/plans/launchers
 docs/audits/
+docs/superpowers/
 
 # temporal maintainer docs for the initial publish — stay local
 /RELEASING.md

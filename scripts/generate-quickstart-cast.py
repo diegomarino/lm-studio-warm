@@ -3,9 +3,9 @@
 
 One cast per user-facing runtime:
 
-  docs/demo-lm-studio-warm.cast           omp      -> docs/quickstart.gif
-  docs/demo-lm-studio-warm-pi.cast        pi       -> docs/quickstart-pi.gif
-  docs/demo-lm-studio-warm-opencode.cast  opencode -> docs/quickstart-opencode.gif
+  docs/assets/quickstart-omp.cast       omp      -> docs/assets/quickstart-omp.gif
+  docs/assets/quickstart-pi.cast        pi       -> docs/assets/quickstart-pi.gif
+  docs/assets/quickstart-opencode.cast  opencode -> docs/assets/quickstart-opencode.gif
 
 The demos are scripted, not screen-recorded, so they stay reproducible and
 free of machine-specific noise — every plugin-facing line is taken verbatim
@@ -241,9 +241,9 @@ def build_opencode():
 
 
 BUILDERS = {
-    "omp": (build_omp, "docs/demo-lm-studio-warm.cast"),
-    "pi": (build_pi, "docs/demo-lm-studio-warm-pi.cast"),
-    "opencode": (build_opencode, "docs/demo-lm-studio-warm-opencode.cast"),
+    "omp": (build_omp, "docs/assets/quickstart-omp.cast"),
+    "pi": (build_pi, "docs/assets/quickstart-pi.cast"),
+    "opencode": (build_opencode, "docs/assets/quickstart-opencode.cast"),
 }
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ it's already loaded and addressable in LM Studio — before it lets a
 completion request leave, instead of paying an in-flight cold-load latency
 spike or racing a "no model loaded" error.
 
-![Quick start: opt in with a config file, LM Studio starts cold, the first request warms the model before it leaves, and lms ps shows the model resident with no TTL](docs/quickstart.gif)
+![Quick start: opt in with a config file, LM Studio starts cold, the first request warms the model before it leaves, and lms ps shows the model resident with no TTL](docs/assets/quickstart-omp.gif)
 
 <sup>Scripted demo using the `omp` package — the status/log
 lines are the plugins' real strings; the cold-load wait is shortened.</sup>
@@ -36,7 +36,7 @@ lm-studio-warm/
 ├── tsconfig.base.json · bunfig.toml
 ├── release-please-config.json · .release-please-manifest.json
 ├── .github/workflows/                # ci.yml (per-package matrix), release-please.yml, publish.yml
-├── docs/                             # superpowers specs & plans, shared demo assets
+├── docs/assets/                      # demo assets — quickstart-<runtime>.{cast,gif}
 └── packages/
     ├── core/              → npm lm-studio-warm-core
     ├── omp/               → npm omp-lm-studio-warm
