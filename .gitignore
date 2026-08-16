@@ -14,6 +14,9 @@ demo-test.cast
 # local audit workspace — reports/ledgers/machine notes stay unpublished
 docs/audits/
 
+# temporal maintainer runbook for the initial publish — stays local
+/RELEASING.md
+
 # repo-level state (main): linked worktrees and agent session dirs
 .worktrees/
 .superpowers/

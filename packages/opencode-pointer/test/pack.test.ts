@@ -13,7 +13,7 @@ import { describe, it, expect, beforeAll, afterAll } from "bun:test"
  * directly on the shipped tarball content: the things a bad `files` or
  * `exports` entry would silently break under workspace resolution but not
  * under a real npm install. The full install-and-import resolution check is
- * a mandatory post-publish step documented in RELEASING.md.
+ * a mandatory post-publish step in the maintainer's publish runbook.
  */
 
 const packageDir = path.join(import.meta.dir, "..")

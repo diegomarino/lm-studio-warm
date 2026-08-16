@@ -35,7 +35,6 @@ lm-studio-warm/
 ├── package.json                      # private workspace root; no publishable code
 ├── tsconfig.base.json · bunfig.toml
 ├── release-please-config.json · .release-please-manifest.json
-├── RELEASING.md                      # publish runbook
 ├── .github/workflows/                # ci.yml (per-package matrix), release-please.yml, publish.yml
 ├── docs/                             # superpowers specs & plans, shared demo assets
 └── packages/
