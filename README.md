@@ -8,15 +8,13 @@ spike or racing a "no model loaded" error.
 
 ![Quick start: opt in with a config file, LM Studio starts cold, the first request warms the model before it leaves, and lms ps shows the model resident with no TTL](docs/quickstart.gif)
 
-<sup>Scripted demo (`scripts/generate-quickstart-cast.py`) using the `omp` package — the status/log
-lines are the plugins' real strings; the cold-load wait is shortened. The
-[`pi`](packages/pi/README.md) and [`opencode`](packages/opencode/README.md) READMEs carry their own
-runtime-specific demos and quick starts.</sup>
+<sup>Scripted demo using the `omp` package — the status/log
+lines are the plugins' real strings; the cold-load wait is shortened.</sup>
 
 ## Packages
 
 | Package | npm name | What it wires into |
-|---|---|---|
+| --- | --- | --- |
 | [`packages/core`](packages/core) | `lm-studio-warm-core` | Runtime-agnostic core: cross-process lock, eviction planning, `lms` CLI client, model discovery, two-tier config loading. Not user-facing on its own. |
 | [`packages/omp`](packages/omp) | `omp-lm-studio-warm` | [`omp`](https://github.com/can1357/oh-my-pi) extension — warms LM Studio models before every `lm-studio` completion stream. |
 | [`packages/pi`](packages/pi) | `pi-lm-studio-warm` | [`pi`](https://github.com/earendil-works/pi) extension — same gate, wired as a native `lm-studio` provider. |
@@ -42,10 +40,10 @@ lm-studio-warm/
 ├── docs/                             # superpowers specs & plans, shared demo assets
 └── packages/
     ├── core/              → npm lm-studio-warm-core
-    ├── omp/                → npm omp-lm-studio-warm
-    ├── pi/                 → npm pi-lm-studio-warm
-    ├── opencode/           → npm opencode-lm-studio-warm
-    └── opencode-pointer/   → legacy-name shim (see Releases)
+    ├── omp/               → npm omp-lm-studio-warm
+    ├── pi/                → npm pi-lm-studio-warm
+    ├── opencode/          → npm opencode-lm-studio-warm
+    └── opencode-pointer/  → legacy-name shim (see Releases)
 ```
 
 ## Development
@@ -68,9 +66,7 @@ Versioning is automated with [release-please](https://github.com/googleapis/rele
 in manifest mode, one component per package. Conventional commits drive
 per-package version bumps; no one edits a version number by hand. The only
 exception is `packages/opencode-pointer` — a re-export shim that keeps the
-pre-rename npm name (`opencode-lmstudio-warm`) resolving to the new package;
-it is not a fifth integration and is published manually. Full runbook in
-[RELEASING.md](RELEASING.md).
+pre-rename npm name (`opencode-lmstudio-warm`) resolving to the new package.
 
 ## License
 
