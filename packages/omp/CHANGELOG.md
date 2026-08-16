@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.1](https://github.com/diegomarino/lm-studio-warm/compare/omp-v0.2.0...omp-v0.2.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **opencode:** keep the historical npm name — the registry forbids the rename ([d291788](https://github.com/diegomarino/lm-studio-warm/commit/d291788bd34c422b2e1ca4699d140647afee2ce2))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * lm-studio-warm-core bumped from ^0.2.0 to ^0.2.1
+
 ## [0.2.0](https://github.com/diegomarino/lm-studio-warm/compare/omp-v0.1.0...omp-v0.2.0) (2026-08-16)
 
 
