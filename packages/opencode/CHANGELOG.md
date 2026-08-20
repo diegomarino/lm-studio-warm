@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.2](https://github.com/diegomarino/lm-studio-warm/compare/opencode-v0.3.1...opencode-v0.3.2) (2026-08-20)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * lm-studio-warm-core bumped from ^0.2.1 to ^0.2.2
+
 ## [0.3.1](https://github.com/diegomarino/lm-studio-warm/compare/opencode-v0.3.0...opencode-v0.3.1) (2026-08-16)
 
 

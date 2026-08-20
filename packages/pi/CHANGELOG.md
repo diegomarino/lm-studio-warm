@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.2](https://github.com/diegomarino/lm-studio-warm/compare/pi-v0.2.1...pi-v0.2.2) (2026-08-20)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * lm-studio-warm-core bumped from ^0.2.1 to ^0.2.2
+
 ## [0.2.1](https://github.com/diegomarino/lm-studio-warm/compare/pi-v0.2.0...pi-v0.2.1) (2026-08-16)
 
 

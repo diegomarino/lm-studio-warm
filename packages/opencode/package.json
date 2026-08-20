@@ -1,6 +1,6 @@
 {
   "name": "opencode-lmstudio-warm",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Deterministic LM Studio model pre-warm gate for opencode — loads and keeps the target model resident before every request, healing cold starts and mid-session TTL evictions.",
   "type": "module",
   "main": "./src/index.ts",
@@ -50,7 +50,7 @@
     "check": "bun run typecheck && bun run test && if command -v shellcheck >/dev/null; then shellcheck --severity=warning test/e2e/verify.sh; else echo 'shellcheck not installed — lint of test/e2e/verify.sh skipped'; fi"
   },
   "dependencies": {
-    "lm-studio-warm-core": "^0.2.1"
+    "lm-studio-warm-core": "^0.2.2"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "1.17.10",

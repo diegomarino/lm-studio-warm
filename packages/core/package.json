@@ -1,6 +1,6 @@
 {
   "name": "lm-studio-warm-core",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Runtime-agnostic LM Studio pre-warm gate: cross-process lock, eviction planning, lms CLI client, model discovery, two-tier config.",
   "type": "module",
   "license": "MIT",

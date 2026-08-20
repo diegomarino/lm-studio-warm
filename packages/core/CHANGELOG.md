@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/diegomarino/lm-studio-warm/compare/core-v0.2.1...core-v0.2.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **core:** atomic deadline write in the lock (temp file + rename) ([4702c02](https://github.com/diegomarino/lm-studio-warm/commit/4702c021e15946a6a693cced3df8e4aed7406c27))
+
 ## [0.2.1](https://github.com/diegomarino/lm-studio-warm/compare/core-v0.2.0...core-v0.2.1) (2026-08-16)
 
 
