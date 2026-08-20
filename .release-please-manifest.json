@@ -1,6 +1,6 @@
 {
-  "packages/core": "0.2.1",
-  "packages/omp": "0.2.1",
-  "packages/pi": "0.2.1",
-  "packages/opencode": "0.3.1"
+  "packages/core": "0.2.2",
+  "packages/omp": "0.2.2",
+  "packages/pi": "0.2.2",
+  "packages/opencode": "0.3.2"
 }
