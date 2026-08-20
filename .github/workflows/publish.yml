@@ -13,10 +13,11 @@
 # trusted publisher; every release after that flows through here.
 #
 # Trigger: release-please publishing the GitHub releases (one event per
-# package) or a manual dispatch. NOTE: releases created by the default
-# GITHUB_TOKEN do not fire this workflow (GitHub anti-recursion) — until
-# release-please gets its own token, dispatch this manually after merging a
-# release PR. The job is idempotent and order-preserving: it walks
+# package) or a manual dispatch. release-please authors its releases with the
+# RELEASE_PLEASE_TOKEN PAT precisely so those events fire this workflow
+# (default-GITHUB_TOKEN events are suppressed by GitHub anti-recursion);
+# workflow_dispatch stays as the manual fallback. The job is idempotent and
+# order-preserving: it walks
 # core → pi → omp → opencode and publishes only versions npm doesn't have
 # yet, so a burst of simultaneous release events cannot publish a dependent
 # before its dependency.

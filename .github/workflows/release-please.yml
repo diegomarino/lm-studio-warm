@@ -3,6 +3,9 @@ name: release-please
 on:
   push:
     branches: [main]
+# Scopes only the auto-generated GITHUB_TOKEN. With RELEASE_PLEASE_TOKEN wired
+# below, the PAT's own scopes (set at PAT creation) are the real authorization
+# boundary — this block is not a safety net for it.
 permissions:
   contents: write
   pull-requests: write
@@ -12,5 +15,12 @@ jobs:
     steps:
       - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         with:
+          # Fine-grained PAT (this repo only; Contents: RW + Pull requests: RW,
+          # expiring). Events authored by a PAT — unlike the default
+          # GITHUB_TOKEN, whose events GitHub suppresses to prevent recursion —
+          # DO trigger downstream workflows: publish.yml on `release:
+          # published`, ci.yml on the release PR itself. Do not push this
+          # wiring before the repo secret exists: an empty token fails the run.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
