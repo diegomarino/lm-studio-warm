@@ -401,6 +401,38 @@ describe("loadArgs", () => {
   })
 })
 
+describe("writeFileAtomic (lock deadline torn-read hardening)", () => {
+  it("publishes only complete values: concurrent readers see old or new content, never a partial file, and no temp residue remains", async () => {
+    const mod = await import("../src/warm-gate")
+    expect(typeof mod.writeFileAtomic).toBe("function")
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "core-lmswarm-atomic-"))
+    const file = path.join(dir, "deadline")
+    const OLD = "1111111111111"
+    const NEW = "2222222222222"
+    fs.writeFileSync(file, OLD)
+
+    const seen = new Set<string>()
+    let stop = false
+    const reader = (async () => {
+      while (!stop) {
+        try {
+          seen.add(fs.readFileSync(file, "utf8"))
+        } catch {}
+        await new Promise((r) => setTimeout(r, 0))
+      }
+    })()
+    for (let i = 0; i < 200; i++) await mod.writeFileAtomic(file, NEW)
+    stop = true
+    await reader
+
+    for (const v of seen) expect([OLD, NEW]).toContain(v)
+    expect(fs.readFileSync(file, "utf8")).toBe(NEW)
+    expect(fs.readdirSync(dir)).toEqual(["deadline"])
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+})
+
 describe("pidAlive / parseLockPid", () => {
   it("probes live pid and parses positive ints only", () => {
     expect(pidAlive(process.pid)).toBe(true)

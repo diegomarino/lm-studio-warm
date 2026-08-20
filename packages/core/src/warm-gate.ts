@@ -71,6 +71,15 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/** Publish `data` at `file` atomically (temp sibling + rename): a concurrent
+ * reader sees the previous or the new complete content, never a torn write.
+ * The temp lives next to `file` — rename is only atomic within a filesystem. */
+export async function writeFileAtomic(file: string, data: string): Promise<void> {
+  const tmp = `${file}.tmp`
+  await fsp.writeFile(tmp, data)
+  await fsp.rename(tmp, file)
+}
+
 export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): WarmGate {
   const run: Runner = deps.run ?? createExecRunner()
   const fetchImpl: NonNullable<WarmGateDeps["fetchImpl"]> = deps.fetchImpl ?? fetch
@@ -136,10 +145,15 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
     } catch {}
   }
 
-  /** True when the lock dir contains anything other than our pid/deadline files. */
+  /** True when the lock dir contains anything other than our pid/deadline
+   * files. deadline.tmp is ours too: a holder killed between writeFileAtomic's
+   * temp write and its rename leaves it behind, and treating that residue as
+   * foreign would make the dead lock unbreakable. */
   function lockDirHasForeignEntries(): boolean {
     try {
-      return fs.readdirSync(opts.lockDir).some((entry) => entry !== "pid" && entry !== "deadline")
+      return fs
+        .readdirSync(opts.lockDir)
+        .some((entry) => entry !== "pid" && entry !== "deadline" && entry !== "deadline.tmp")
     } catch {
       return false
     }
@@ -283,7 +297,7 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
           await fsp.writeFile(path.join(opts.lockDir, "pid"), String(process.pid))
         } catch {}
         try {
-          await fsp.writeFile(path.join(opts.lockDir, "deadline"), String(now() + staleBudgetMs))
+          await writeFileAtomic(path.join(opts.lockDir, "deadline"), String(now() + staleBudgetMs))
         } catch {}
         return releaseLockIfOurs
       } catch (err: any) {
@@ -469,7 +483,7 @@ export function createWarmGate(opts: WarmOptions, deps: WarmGateDeps = {}): Warm
     const touchLock = () =>
       Promise.all([
         fsp.utimes(opts.lockDir, new Date(now()), new Date(now())).catch(() => {}),
-        fsp.writeFile(path.join(opts.lockDir, "deadline"), String(now() + staleBudgetMs)).catch(() => {}),
+        writeFileAtomic(path.join(opts.lockDir, "deadline"), String(now() + staleBudgetMs)).catch(() => {}),
       ]).then(() => {})
 
     try {

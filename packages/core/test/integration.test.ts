@@ -415,6 +415,30 @@ describe("warm gate", () => {
     expect(fs.existsSync(path.join(sb.opts.lockDir, "user-data.txt"))).toBe(true)
     fs.rmSync(sb.opts.lockDir, { recursive: true, force: true })
   })
+
+  it("foreign-entry guard tolerates an orphaned deadline.tmp when breaking a dead holder's lock", async () => {
+    // A holder killed between the temp write and the rename leaves
+    // deadline.tmp behind; that residue must not read as a foreign entry, or
+    // the dead lock becomes permanently unbreakable.
+    const sb = makeSandbox()
+    fs.mkdirSync(sb.opts.lockDir)
+    fs.writeFileSync(path.join(sb.opts.lockDir, "pid"), "2147000000") // dead
+    fs.writeFileSync(path.join(sb.opts.lockDir, "deadline"), String(Date.now() + 10 * 60_000))
+    fs.writeFileSync(path.join(sb.opts.lockDir, "deadline.tmp"), String(Date.now()))
+    const r = await sb.warm("k")
+    expect(r.ok).toBe(true)
+    expect(sb.loads("k")).toBe(1)
+  })
+
+  it("release tolerates an orphaned deadline.tmp alongside pid + deadline", async () => {
+    const sb = makeSandbox()
+    fs.mkdirSync(sb.opts.lockDir)
+    fs.writeFileSync(path.join(sb.opts.lockDir, "pid"), String(process.pid))
+    fs.writeFileSync(path.join(sb.opts.lockDir, "deadline"), String(Date.now() + 60_000))
+    fs.writeFileSync(path.join(sb.opts.lockDir, "deadline.tmp"), String(Date.now()))
+    sb.gate.releaseLockIfOurs()
+    expect(fs.existsSync(sb.opts.lockDir)).toBe(false)
+  })
 })
 
 describe("warm gate hardening (audit regressions)", () => {
